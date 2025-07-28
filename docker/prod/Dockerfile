@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm as builder
+FROM python:3.13-slim-bookworm as builder
 
 WORKDIR /app
 
@@ -13,7 +13,7 @@ RUN poetry install --no-interaction --no-ansi --without dev
 
 RUN poetry export -f requirements.txt --output requirements.txt --without-hashes
 
-FROM python:3.12-slim-bookworm
+FROM python:3.13-slim-bookworm
 
 RUN useradd -m -u 1000 drift
 
