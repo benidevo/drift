@@ -1,4 +1,4 @@
-FROM python:3.12-slim-bookworm as builder
+FROM python:3.12-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -11,7 +11,8 @@ COPY pyproject.toml poetry.lock* ./
 
 RUN poetry install --no-interaction --no-ansi --without dev
 
-RUN poetry export -f requirements.txt --output requirements.txt --without-hashes
+RUN poetry self add poetry-plugin-export && \
+    poetry export -f requirements.txt --output requirements.txt --without-hashes --without dev
 
 FROM python:3.12-slim-bookworm
 
