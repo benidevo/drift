@@ -17,4 +17,3 @@ def setup_logging(level: str = "INFO") -> None:
         logger.addHandler(handler)
 
     logger.setLevel(level)
-    # Keep propagate=True so pytest can capture logs
