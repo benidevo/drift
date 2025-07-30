@@ -65,7 +65,7 @@ def test_to_file_change_new_file():
     assert result.path == "src/new_file.py"
     assert result.old_path is None
     assert result.status == FileStatus.ADDED
-    assert result.additions == 0
+    assert result.additions == 1
     assert result.deletions == 0
     assert result.patch == "@@ -0,0 +1,100 @@\n+new content"
 
