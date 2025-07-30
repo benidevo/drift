@@ -1,0 +1,15 @@
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%  # Allow 1% drop in coverage
+    patch:
+      default:
+        target: 80%  # Require 80% coverage on new/modified code
+        threshold: 0%
+
+comment:
+  layout: "reach,diff,flags,files,footer"
+  behavior: default
+  require_changes: true
