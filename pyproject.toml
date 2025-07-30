@@ -55,6 +55,13 @@ ignore = []
 fixable = ["ALL"]
 unfixable = []
 
+[tool.ruff.lint.isort]
+force-single-line = false
+force-sort-within-sections = true
+lines-after-imports = 2
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+known-first-party = ["drift"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -78,6 +85,10 @@ warn_unreachable = true
 strict_equality = true
 explicit_package_bases = true
 mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = "github.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
