@@ -115,14 +115,14 @@ class GitLabMapper:
                     line_from = position.get("old_line")
                     line_to = position.get("old_line")
 
+            body = note.get("body") or ""
             return Comment(
                 id=str(note["id"]),
                 author_username=note["author"]["username"],
-                body=note["body"],
+                body=body,
                 created_at=note["created_at"],
                 updated_at=note.get("updated_at"),
-                is_drift_comment="drift" in note["body"].lower()
-                or "🌊" in note["body"],
+                is_drift_comment="drift" in body.lower() or "🌊" in body,
                 file_path=file_path,
                 line_from=line_from,
                 line_to=line_to,

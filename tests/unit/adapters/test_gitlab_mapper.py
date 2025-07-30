@@ -273,3 +273,34 @@ def test_should_raise_error_when_note_author_is_missing_username():
 
     with pytest.raises(ValueError, match="Invalid GitLab note data"):
         GitLabMapper.to_comment(note_data)
+
+
+def test_should_handle_none_body_when_mapping_comment():
+    note_data = {
+        "id": 12345,
+        "author": {"username": "reviewer"},
+        "body": None,
+        "created_at": "2023-01-01T12:00:00Z",
+        "updated_at": None,
+        "position": None,
+    }
+
+    result = GitLabMapper.to_comment(note_data)
+
+    assert result.body == ""
+    assert result.is_drift_comment is False
+
+
+def test_should_handle_missing_body_when_mapping_comment():
+    note_data = {
+        "id": 12345,
+        "author": {"username": "reviewer"},
+        "created_at": "2023-01-01T12:00:00Z",
+        "updated_at": None,
+        "position": None,
+    }
+
+    result = GitLabMapper.to_comment(note_data)
+
+    assert result.body == ""
+    assert result.is_drift_comment is False

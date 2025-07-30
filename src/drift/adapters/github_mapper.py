@@ -59,8 +59,10 @@ class GitHubMapper:
                 updated_at=comment.updated_at.isoformat()
                 if comment.updated_at
                 else None,
-                is_drift_comment="drift" in comment.body.lower()
-                or "🌊" in comment.body,
+                is_drift_comment=bool(
+                    comment.body
+                    and ("drift" in comment.body.lower() or "🌊" in comment.body)
+                ),
             )
         except AttributeError as e:
             raise ValueError(f"Invalid GitHub issue comment data: {e}") from e
@@ -76,8 +78,10 @@ class GitHubMapper:
                 updated_at=comment.updated_at.isoformat()
                 if comment.updated_at
                 else None,
-                is_drift_comment="drift" in comment.body.lower()
-                or "🌊" in comment.body,
+                is_drift_comment=bool(
+                    comment.body
+                    and ("drift" in comment.body.lower() or "🌊" in comment.body)
+                ),
                 file_path=comment.path,
                 line_from=comment.original_line or comment.line,
                 line_to=comment.line,

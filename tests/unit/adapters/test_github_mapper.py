@@ -269,3 +269,45 @@ def test_should_raise_error_when_review_comment_data_is_invalid():
 
     with pytest.raises(ValueError, match="Invalid GitHub review comment data"):
         GitHubMapper.to_comment_from_review_comment(mock_comment)
+
+
+def test_should_handle_none_body_when_mapping_issue_comment():
+    spec = ["id", "user", "body", "created_at", "updated_at"]
+    mock_comment = MagicMock(spec=spec)
+    mock_comment.id = 12345
+    mock_comment.user.login = "reviewer"
+    mock_comment.body = None
+    mock_comment.created_at = datetime(2023, 1, 1, 12, 0, 0)
+    mock_comment.updated_at = None
+
+    result = GitHubMapper.to_comment_from_issue_comment(mock_comment)
+
+    assert result.body is None
+    assert result.is_drift_comment is False
+
+
+def test_should_handle_none_body_when_mapping_review_comment():
+    spec = [
+        "id",
+        "user",
+        "body",
+        "created_at",
+        "updated_at",
+        "path",
+        "original_line",
+        "line",
+    ]
+    mock_comment = MagicMock(spec=spec)
+    mock_comment.id = 54321
+    mock_comment.user.login = "reviewer"
+    mock_comment.body = None
+    mock_comment.created_at = datetime(2023, 1, 1, 12, 0, 0)
+    mock_comment.updated_at = None
+    mock_comment.path = "src/main.py"
+    mock_comment.original_line = None
+    mock_comment.line = 10
+
+    result = GitHubMapper.to_comment_from_review_comment(mock_comment)
+
+    assert result.body is None
+    assert result.is_drift_comment is False
