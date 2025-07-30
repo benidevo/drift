@@ -1,8 +1,10 @@
+import pytest
+
 from drift.adapters.gitlab_mapper import GitLabMapper
 from drift.models import FileStatus
 
 
-def test_to_pull_request_info():
+def test_should_map_merge_request_when_mr_is_open():
     mr_data = {
         "iid": 123,
         "title": "Add new feature",
@@ -29,7 +31,7 @@ def test_to_pull_request_info():
     assert result.updated_at == "2023-01-02T12:00:00Z"
 
 
-def test_to_pull_request_info_merged():
+def test_should_map_merge_request_when_mr_is_merged():
     mr_data = {
         "iid": 456,
         "title": "Fix bug",
@@ -50,7 +52,7 @@ def test_to_pull_request_info_merged():
     assert result.is_merged is True
 
 
-def test_to_file_change_new_file():
+def test_should_map_file_change_when_file_is_new():
     change_data = {
         "old_path": "src/new_file.py",
         "new_path": "src/new_file.py",
@@ -70,22 +72,27 @@ def test_to_file_change_new_file():
     assert result.patch == "@@ -0,0 +1,100 @@\n+new content"
 
 
-def test_to_file_change_deleted_file():
+def test_should_map_file_change_when_file_is_deleted():
     change_data = {
         "old_path": "src/old_file.py",
         "new_path": "src/old_file.py",
         "new_file": False,
         "deleted_file": True,
         "renamed_file": False,
-        "diff": "@@ -1,50 +0,0 @@\n-old content",
+        "diff": "@@ -1,50 +0,0 @@\n-old content\n-more content",
     }
 
     result = GitLabMapper.to_file_change(change_data)
 
+    assert result.path == "src/old_file.py"
+    assert result.old_path is None
     assert result.status == FileStatus.DELETED
+    assert result.additions == 0
+    assert result.deletions == 2  # Two lines deleted based on diff
+    assert result.patch == "@@ -1,50 +0,0 @@\n-old content\n-more content"
 
 
-def test_to_file_change_renamed_file():
+def test_should_map_file_change_when_file_is_renamed():
     change_data = {
         "old_path": "src/old_name.py",
         "new_path": "src/new_name.py",
@@ -103,22 +110,30 @@ def test_to_file_change_renamed_file():
     assert result.patch == ""
 
 
-def test_to_file_change_modified_file():
+def test_should_map_file_change_when_file_is_modified():
     change_data = {
         "old_path": "src/file.py",
         "new_path": "src/file.py",
         "new_file": False,
         "deleted_file": False,
         "renamed_file": False,
-        "diff": "diff content",
+        "diff": (
+            "@@ -10,3 +10,4 @@\n def hello():\n"
+            "-    print('old')\n+    print('new')\n+    return True"
+        ),
     }
 
     result = GitLabMapper.to_file_change(change_data)
 
+    assert result.path == "src/file.py"
+    assert result.old_path is None
     assert result.status == FileStatus.MODIFIED
+    assert result.additions == 2  # Two lines added
+    assert result.deletions == 1  # One line deleted
+    assert "@@ -10,3 +10,4 @@" in result.patch
 
 
-def test_to_comment_general():
+def test_should_map_comment_when_note_contains_drift_marker():
     note_data = {
         "id": 12345,
         "author": {"username": "reviewer"},
@@ -141,7 +156,7 @@ def test_to_comment_general():
     assert result.line_to is None
 
 
-def test_to_comment_with_new_line_position():
+def test_should_map_comment_when_note_has_new_line_position():
     note_data = {
         "id": 54321,
         "author": {"username": "reviewer"},
@@ -164,7 +179,7 @@ def test_to_comment_with_new_line_position():
     assert result.updated_at is None
 
 
-def test_to_comment_with_old_line_position():
+def test_should_map_comment_when_note_has_old_line_position():
     note_data = {
         "id": 99999,
         "author": {"username": "reviewer"},
@@ -186,7 +201,7 @@ def test_to_comment_with_old_line_position():
     assert result.line_to == 20
 
 
-def test_to_comment_empty_position():
+def test_should_map_comment_when_position_is_empty():
     note_data = {
         "id": 11111,
         "author": {"username": "user"},
@@ -201,3 +216,60 @@ def test_to_comment_empty_position():
     assert result.file_path is None
     assert result.line_from is None
     assert result.line_to is None
+
+
+def test_should_raise_error_when_mr_data_is_missing_fields():
+    mr_data = {
+        "iid": 123,
+        "title": "Test MR",
+    }
+
+    with pytest.raises(ValueError, match="Invalid GitLab merge request data"):
+        GitLabMapper.to_pull_request_info(mr_data)
+
+
+def test_should_raise_error_when_mr_author_is_missing_username():
+    mr_data = {
+        "iid": 123,
+        "title": "Test MR",
+        "author": {},
+        "source_branch": "feature",
+        "target_branch": "main",
+        "state": "opened",
+        "created_at": "2023-01-01T12:00:00Z",
+        "updated_at": "2023-01-02T12:00:00Z",
+    }
+
+    with pytest.raises(ValueError, match="Invalid GitLab merge request data"):
+        GitLabMapper.to_pull_request_info(mr_data)
+
+
+def test_should_raise_error_when_file_change_data_is_invalid():
+    change_data = {
+        "old_path": "file.py",
+    }
+
+    with pytest.raises(ValueError, match="Invalid GitLab file change data"):
+        GitLabMapper.to_file_change(change_data)
+
+
+def test_should_raise_error_when_note_data_is_missing_fields():
+    note_data = {
+        "id": 12345,
+        "body": "Comment",
+    }
+
+    with pytest.raises(ValueError, match="Invalid GitLab note data"):
+        GitLabMapper.to_comment(note_data)
+
+
+def test_should_raise_error_when_note_author_is_missing_username():
+    note_data = {
+        "id": 12345,
+        "author": {},
+        "body": "Comment",
+        "created_at": "2023-01-01T12:00:00Z",
+    }
+
+    with pytest.raises(ValueError, match="Invalid GitLab note data"):
+        GitLabMapper.to_comment(note_data)

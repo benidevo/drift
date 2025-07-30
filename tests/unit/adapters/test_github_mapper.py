@@ -1,11 +1,13 @@
 from datetime import datetime
 from unittest.mock import MagicMock
 
+import pytest
+
 from drift.adapters.github_mapper import GitHubMapper
 from drift.models import FileStatus
 
 
-def test_to_pull_request_info():
+def test_should_map_pull_request_when_pr_is_open():
     spec = [
         "number",
         "title",
@@ -44,7 +46,7 @@ def test_to_pull_request_info():
     assert result.updated_at == "2023-01-02T12:00:00"
 
 
-def test_to_pull_request_info_merged():
+def test_should_map_pull_request_when_pr_is_merged():
     spec = [
         "number",
         "title",
@@ -78,7 +80,7 @@ def test_to_pull_request_info_merged():
     assert result.updated_at == "2023-01-01T12:00:00"
 
 
-def test_to_file_change_added():
+def test_should_map_file_change_when_file_is_added():
     spec = ["filename", "status", "additions", "deletions", "patch"]
     mock_file = MagicMock(spec=spec)
     mock_file.filename = "src/new_file.py"
@@ -97,7 +99,7 @@ def test_to_file_change_added():
     assert result.patch == "@@ -0,0 +1,100 @@\n+new content"
 
 
-def test_to_file_change_deleted():
+def test_should_map_file_change_when_file_is_deleted():
     spec = ["filename", "status", "additions", "deletions", "patch"]
     mock_file = MagicMock(spec=spec)
     mock_file.filename = "src/old_file.py"
@@ -108,10 +110,15 @@ def test_to_file_change_deleted():
 
     result = GitHubMapper.to_file_change(mock_file)
 
+    assert result.path == "src/old_file.py"
+    assert result.old_path is None
     assert result.status == FileStatus.DELETED
+    assert result.additions == 0
+    assert result.deletions == 50
+    assert result.patch == "@@ -1,50 +0,0 @@\n-old content"
 
 
-def test_to_file_change_renamed():
+def test_should_map_file_change_when_file_is_renamed():
     spec = [
         "filename",
         "status",
@@ -136,7 +143,7 @@ def test_to_file_change_renamed():
     assert result.patch == ""
 
 
-def test_to_file_change_unknown_status():
+def test_should_default_to_modified_when_file_status_is_unknown():
     spec = ["filename", "status", "additions", "deletions", "patch"]
     mock_file = MagicMock(spec=spec)
     mock_file.filename = "src/file.py"
@@ -150,7 +157,7 @@ def test_to_file_change_unknown_status():
     assert result.status == FileStatus.MODIFIED
 
 
-def test_to_comment_from_issue_comment():
+def test_should_map_comment_when_issue_comment_contains_drift_marker():
     spec = ["id", "user", "body", "created_at", "updated_at"]
     mock_comment = MagicMock(spec=spec)
     mock_comment.id = 12345
@@ -172,7 +179,7 @@ def test_to_comment_from_issue_comment():
     assert result.line_to is None
 
 
-def test_to_comment_from_review_comment():
+def test_should_map_review_comment_when_comment_has_line_numbers():
     spec = [
         "id",
         "user",
@@ -202,7 +209,7 @@ def test_to_comment_from_review_comment():
     assert result.is_drift_comment is False
 
 
-def test_to_comment_from_review_comment_no_original_line():
+def test_should_use_line_number_when_original_line_is_missing():
     spec = [
         "id",
         "user",
@@ -227,3 +234,38 @@ def test_to_comment_from_review_comment_no_original_line():
 
     assert result.line_from == 20
     assert result.line_to == 20
+
+
+def test_should_raise_error_when_pr_data_is_invalid():
+    mock_pr = MagicMock()
+    mock_pr.number = 123
+    del mock_pr.user
+
+    with pytest.raises(ValueError, match="Invalid GitHub PR data"):
+        GitHubMapper.to_pull_request_info(mock_pr)
+
+
+def test_should_raise_error_when_file_data_is_invalid():
+    mock_file = MagicMock()
+    del mock_file.filename
+
+    with pytest.raises(ValueError, match="Invalid GitHub file data"):
+        GitHubMapper.to_file_change(mock_file)
+
+
+def test_should_raise_error_when_issue_comment_data_is_invalid():
+    mock_comment = MagicMock()
+    mock_comment.id = 12345
+    del mock_comment.user
+
+    with pytest.raises(ValueError, match="Invalid GitHub issue comment data"):
+        GitHubMapper.to_comment_from_issue_comment(mock_comment)
+
+
+def test_should_raise_error_when_review_comment_data_is_invalid():
+    mock_comment = MagicMock()
+    mock_comment.id = 54321
+    del mock_comment.user
+
+    with pytest.raises(ValueError, match="Invalid GitHub review comment data"):
+        GitHubMapper.to_comment_from_review_comment(mock_comment)
