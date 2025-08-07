@@ -94,7 +94,7 @@ def test_should_add_jitter_when_jitter_is_enabled() -> None:
         sleep_times.append(seconds)
 
     with patch("drift.clients.mixins.retry.sleep", side_effect=mock_sleep):
-        with patch("random.random", return_value=0.5):
+        with patch("secrets.SystemRandom.random", return_value=0.5):
             result = wrapped()
 
     assert result == "success"

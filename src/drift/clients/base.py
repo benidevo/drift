@@ -11,7 +11,7 @@ from drift.logger import get_logger
 T = TypeVar("T")
 
 
-class BaseGitClient(GitClient, Generic[T], ABC):
+class BaseGitClient(GitClient, Generic[T], ABC):  # noqa: UP046
     def __init__(
         self,
         client: T,
