@@ -51,7 +51,8 @@ class RetryMixin:
                 )
                 return cast(float, wait_func(retry_state))
             else:
-                wait_time = min(backoff_factor * (2 ** (retry_count - 1)), max_wait)
+                exponent = max(retry_count, 0)
+                wait_time = min(backoff_factor * (2**exponent), max_wait)
                 return float(wait_time)
 
         def should_retry(retry_state: RetryCallState) -> bool:

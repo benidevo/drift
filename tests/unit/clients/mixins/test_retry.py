@@ -74,7 +74,10 @@ def test_should_use_exponential_backoff_when_jitter_is_disabled() -> None:
     assert result == "success"
     assert len(sleep_times) == 2
     assert sleep_times[0] > 0
-    assert sleep_times[1] > sleep_times[0]
+    # With the fix, first retry uses exponent 0 (wait = 1.0 * 2^0 = 1.0)
+    # second retry uses exponent 1 (wait = 1.0 * 2^1 = 2.0)
+    assert sleep_times[0] == 1.0  # First retry: backoff_factor * 2^0
+    assert sleep_times[1] == 2.0  # Second retry: backoff_factor * 2^1
 
 
 def test_should_respect_max_wait_when_backoff_exceeds_limit() -> None:

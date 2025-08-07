@@ -54,11 +54,17 @@ class PaginationMixin:
         page_size: int = 100,
         max_items: int | None = None,
     ) -> list[T]:
+        if max_items is None:
+            max_items = 10000
+            self._pagination_logger.debug(
+                f"No max_items specified, using default limit of {max_items}"
+            )
+
         results: list[T] = []
 
         for item in self.paginate(fetch_func, page_size):
             results.append(item)
-            if max_items is not None and len(results) >= max_items:
+            if len(results) >= max_items:
                 self._pagination_logger.info(f"Reached max_items limit ({max_items})")
                 break
 

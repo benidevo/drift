@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import os
 from pathlib import Path
+import re
 
 import yaml
 
@@ -21,6 +22,28 @@ class DriftConfig:
     log_level: str = "INFO"
     log_format: str = "json"
     connection_pool_size: int = 10
+
+    @staticmethod
+    def _safe_parse_int(value: str, name: str, default: int) -> int:
+        if not value:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError) as e:
+            raise ConfigurationError(
+                f"Invalid integer value for {name}: '{value}'. Must be a valid integer."
+            ) from e
+
+    @staticmethod
+    def _safe_parse_float(value: str, name: str, default: float) -> float:
+        if not value:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError) as e:
+            raise ConfigurationError(
+                f"Invalid float value for {name}: '{value}'. Must be a valid number."
+            ) from e
 
     def __post_init__(self) -> None:
         if self.cache_ttl < 0:
@@ -69,14 +92,24 @@ class DriftConfig:
             token=token,
             repo=repo,
             base_url=base_url,
-            cache_ttl=int(os.environ.get("DRIFT_CACHE_TTL", "300")),
-            max_retries=int(os.environ.get("DRIFT_MAX_RETRIES", "3")),
-            backoff_factor=float(os.environ.get("DRIFT_BACKOFF_FACTOR", "1.0")),
-            timeout=int(os.environ.get("DRIFT_TIMEOUT", "30")),
+            cache_ttl=cls._safe_parse_int(
+                os.environ.get("DRIFT_CACHE_TTL", ""), "DRIFT_CACHE_TTL", 300
+            ),
+            max_retries=cls._safe_parse_int(
+                os.environ.get("DRIFT_MAX_RETRIES", ""), "DRIFT_MAX_RETRIES", 3
+            ),
+            backoff_factor=cls._safe_parse_float(
+                os.environ.get("DRIFT_BACKOFF_FACTOR", ""), "DRIFT_BACKOFF_FACTOR", 1.0
+            ),
+            timeout=cls._safe_parse_int(
+                os.environ.get("DRIFT_TIMEOUT", ""), "DRIFT_TIMEOUT", 30
+            ),
             log_level=os.environ.get("DRIFT_LOG_LEVEL", "INFO"),
             log_format=os.environ.get("DRIFT_LOG_FORMAT", "json"),
-            connection_pool_size=int(
-                os.environ.get("DRIFT_CONNECTION_POOL_SIZE", "10")
+            connection_pool_size=cls._safe_parse_int(
+                os.environ.get("DRIFT_CONNECTION_POOL_SIZE", ""),
+                "DRIFT_CONNECTION_POOL_SIZE",
+                10,
             ),
         )
 
@@ -109,7 +142,17 @@ class DriftConfig:
         if not token:
             raise ConfigurationError("authentication.token not specified")
 
-        token = os.path.expandvars(token)
+        expanded_token = os.path.expandvars(token)
+
+        if re.search(
+            r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*(?![A-Za-z0-9_])", expanded_token
+        ):
+            raise ConfigurationError(
+                "Token contains unexpanded environment variables. "
+                "Please ensure all environment variables in the token are set."
+            )
+
+        token = expanded_token
 
         repo = data.get("repository")
         if not repo:
