@@ -20,17 +20,6 @@ class PaginationMixin:
         page_size: int = 100,
         max_pages: int | None = None,
     ) -> Generator[T, None, None]:
-        """
-        Generic pagination helper.
-
-        Args:
-            fetch_func: Function that takes page number and returns (items, has_more)
-            page_size: Number of items per page
-            max_pages: Maximum number of pages to fetch (None for all)
-
-        Yields:
-            Individual items from all pages
-        """
         page = 1
         total_items = 0
 
@@ -65,17 +54,6 @@ class PaginationMixin:
         page_size: int = 100,
         max_items: int | None = None,
     ) -> list[T]:
-        """
-        Collect all paginated results into a list.
-
-        Args:
-            fetch_func: Function that takes page number and returns (items, has_more)
-            page_size: Number of items per page
-            max_items: Maximum total items to collect (None for all)
-
-        Returns:
-            List of all collected items
-        """
         results: list[T] = []
 
         for item in self.paginate(fetch_func, page_size):
@@ -89,16 +67,6 @@ class PaginationMixin:
     def paginate_github(
         self, paginated_list: Any, max_items: int | None = None
     ) -> Generator[Any, None, None]:
-        """
-        Paginate through a PyGithub PaginatedList.
-
-        Args:
-            paginated_list: PyGithub PaginatedList object
-            max_items: Maximum items to yield
-
-        Yields:
-            Individual items from the paginated list
-        """
         count = 0
         for item in paginated_list:
             yield item
@@ -110,16 +78,6 @@ class PaginationMixin:
     def paginate_gitlab(
         self, generator: Generator[Any, None, None], max_items: int | None = None
     ) -> Generator[Any, None, None]:
-        """
-        Paginate through a python-gitlab generator.
-
-        Args:
-            generator: python-gitlab generator
-            max_items: Maximum items to yield
-
-        Yields:
-            Individual items from the generator
-        """
         count = 0
         for item in generator:
             yield item

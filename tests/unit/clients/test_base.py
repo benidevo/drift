@@ -47,7 +47,6 @@ def test_should_initialize_base_client_when_parameters_are_provided() -> None:
     assert client.max_retries == 5
     assert client.backoff_factor == 2.0
     assert client._repo is None
-    assert client._cache == {}
 
 
 def test_should_lazy_load_repository_when_accessed() -> None:
@@ -98,29 +97,6 @@ def test_should_raise_exception_when_all_retry_attempts_fail() -> None:
             wrapped()
 
     assert mock_func.call_count == 3
-
-
-def test_should_manage_cache_when_performing_operations() -> None:
-    client = ConcreteGitClient(client=Mock(), repo_identifier="owner/repo")
-
-    assert client._get_from_cache("key1") is None
-
-    client._set_cache("key1", "value1")
-    client._set_cache("key2", "value2")
-    client._set_cache("test_key3", "value3")
-
-    assert client._get_from_cache("key1") == "value1"
-    assert client._get_from_cache("key2") == "value2"
-    assert client._get_from_cache("test_key3") == "value3"
-
-    client._clear_cache("test")
-    assert client._get_from_cache("key1") == "value1"
-    assert client._get_from_cache("key2") == "value2"
-    assert client._get_from_cache("test_key3") is None
-
-    client._clear_cache()
-    assert client._get_from_cache("key1") is None
-    assert client._get_from_cache("key2") is None
 
 
 def test_should_use_custom_max_retries_when_specified() -> None:

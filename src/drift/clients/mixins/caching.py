@@ -1,29 +1,22 @@
 from collections.abc import Callable
-from dataclasses import dataclass
 from functools import wraps
 import hashlib
 import json
-import time
 from typing import Any
 
+from cachetools import TTLCache
+
 from drift.logger import get_logger
-
-
-@dataclass(frozen=True, slots=True)
-class CacheEntry:
-    value: Any
-    expires_at: float
-
-    def is_expired(self) -> bool:
-        return time.time() > self.expires_at
 
 
 class CacheMixin:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._cache: dict[str, CacheEntry] = {}
+        cache_ttl = getattr(self, "cache_ttl", 300)
+        max_size = getattr(self, "cache_max_size", 500)
+        self._cache: TTLCache[str, Any] = TTLCache(maxsize=max_size, ttl=cache_ttl)
         self._cache_logger = get_logger(f"{self.__class__.__name__}.CacheMixin")
-        self._cache_ttl = getattr(self, "cache_ttl", 300)
+        self._cache_ttl = cache_ttl
 
     def _make_cache_key(self, *args: Any, **kwargs: Any) -> str:
         key_data = {
@@ -36,14 +29,6 @@ class CacheMixin:
     def with_cache(
         self, ttl: int | None = None, key_prefix: str = ""
     ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-        """
-        Decorator to cache function results with TTL.
-
-        Args:
-            ttl: Time-to-live in seconds (uses instance default if None)
-            key_prefix: Prefix for cache keys
-        """
-
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -59,20 +44,12 @@ class CacheMixin:
                 )
 
                 if cache_key in self._cache:
-                    entry = self._cache[cache_key]
-                    if not entry.is_expired():
-                        self._cache_logger.debug(f"Cache hit for {cache_key}")
-                        return entry.value
-                    else:
-                        self._cache_logger.debug(f"Cache expired for {cache_key}")
-                        del self._cache[cache_key]
+                    self._cache_logger.debug(f"Cache hit for {cache_key}")
+                    return self._cache[cache_key]
 
                 self._cache_logger.debug(f"Cache miss for {cache_key}")
                 result = func(*args, **kwargs)
-
-                self._cache[cache_key] = CacheEntry(
-                    value=result, expires_at=time.time() + cache_ttl
-                )
+                self._cache[cache_key] = result
 
                 return result
 
@@ -81,12 +58,6 @@ class CacheMixin:
         return decorator
 
     def clear_cache(self, pattern: str | None = None) -> None:
-        """
-        Clear cache entries.
-
-        Args:
-            pattern: Clear only keys containing this pattern (clears all if None)
-        """
         if pattern is None:
             self._cache_logger.info("Clearing entire cache")
             self._cache.clear()
@@ -98,18 +69,10 @@ class CacheMixin:
             for key in keys_to_delete:
                 del self._cache[key]
 
-    def evict_expired(self) -> None:
-        expired_keys = [key for key, entry in self._cache.items() if entry.is_expired()]
-        self._cache_logger.info(f"Evicting {len(expired_keys)} expired cache entries")
-        for key in expired_keys:
-            del self._cache[key]
-
     def get_cache_stats(self) -> dict[str, Any]:
-        total_entries = len(self._cache)
-        expired_entries = sum(1 for entry in self._cache.values() if entry.is_expired())
         return {
-            "total_entries": total_entries,
-            "expired_entries": expired_entries,
-            "active_entries": total_entries - expired_entries,
+            "total_entries": len(self._cache),
+            "max_size": self._cache.maxsize,
+            "ttl": self._cache.ttl,
             "cache_keys": list(self._cache.keys()),
         }

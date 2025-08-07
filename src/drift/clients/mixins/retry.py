@@ -26,18 +26,6 @@ class RetryMixin:
             ConnectionError,
         ),
     ) -> Callable[..., Any]:
-        """
-        Decorator to retry a function with exponential backoff.
-
-        Args:
-            func: Function to retry
-            max_retries: Maximum number of retry attempts
-            backoff_factor: Base wait time multiplier
-            max_wait: Maximum wait time between retries
-            jitter: Add random jitter to wait time
-            retry_on: Tuple of exception types to retry on
-        """
-
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             last_exception: Exception | None = None

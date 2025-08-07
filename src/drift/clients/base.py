@@ -28,7 +28,6 @@ class BaseGitClient(GitClient, Generic[T], ABC):  # noqa: UP046
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
         self._repo: Any = None
-        self._cache: dict[str, Any] = {}
 
     @property
     def repo(self) -> Any:
@@ -65,19 +64,3 @@ class BaseGitClient(GitClient, Generic[T], ABC):  # noqa: UP046
             raise RuntimeError("Retry failed with no exception")
 
         return wrapper
-
-    def _get_from_cache(self, key: str) -> Any | None:
-        if key in self._cache:
-            return self._cache[key]
-        return None
-
-    def _set_cache(self, key: str, value: Any) -> None:
-        self._cache[key] = value
-
-    def _clear_cache(self, pattern: str | None = None) -> None:
-        if pattern is None:
-            self._cache.clear()
-        else:
-            keys_to_delete = [k for k in self._cache if pattern in k]
-            for key in keys_to_delete:
-                del self._cache[key]
