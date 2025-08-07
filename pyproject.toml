@@ -18,6 +18,7 @@ jira = {version = "^3.8.0", optional = true}
 pyyaml = "^6.0.2"
 python-dateutil = "^2.8.2"
 cachetools = "^6.1.0"
+tenacity = "^9.1.2"
 
 [tool.poetry.extras]
 jira = ["jira"]
@@ -97,6 +98,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "cachetools"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tenacity"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

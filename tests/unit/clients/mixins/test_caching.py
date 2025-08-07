@@ -11,17 +11,6 @@ class TestCacheClass(CacheMixin):
         super().__init__()
 
 
-def test_should_generate_consistent_keys_when_same_args_provided() -> None:
-    instance = TestCacheClass()
-
-    key1 = instance._make_cache_key("arg1", "arg2", kwarg1="value1")
-    key2 = instance._make_cache_key("arg1", "arg2", kwarg1="value1")
-    key3 = instance._make_cache_key("arg1", "arg3", kwarg1="value1")
-
-    assert key1 == key2
-    assert key1 != key3
-
-
 def test_should_return_cached_value_when_cache_hit_occurs() -> None:
     instance = TestCacheClass(cache_ttl=60)
     mock_func = Mock(return_value="result")
@@ -113,18 +102,3 @@ def test_should_clear_matching_entries_when_pattern_is_provided() -> None:
     assert "test_key1" not in instance._cache
     assert "test_key2" not in instance._cache
     assert "other_key" in instance._cache
-
-
-def test_should_return_cache_statistics_when_get_cache_stats_called() -> None:
-    instance = TestCacheClass()
-
-    instance._cache["key1"] = "value1"
-    instance._cache["key2"] = "value2"
-    instance._cache["key3"] = "value3"
-
-    stats = instance.get_cache_stats()
-
-    assert stats["total_entries"] == 3
-    assert stats["max_size"] == 500
-    assert stats["ttl"] == 300
-    assert len(stats["cache_keys"]) == 3

@@ -1,17 +1,15 @@
 from abc import ABC
-from collections.abc import Callable
-from functools import wraps
-from time import sleep
 from typing import Any, Generic, TypeVar
 
 from drift.client import GitClient
+from drift.clients.mixins.retry import RetryMixin
 from drift.logger import get_logger
 
 
 T = TypeVar("T")
 
 
-class BaseGitClient(GitClient, Generic[T], ABC):  # noqa: UP046
+class BaseGitClient(GitClient, RetryMixin, Generic[T], ABC):  # noqa: UP046
     def __init__(
         self,
         client: T,
@@ -21,6 +19,7 @@ class BaseGitClient(GitClient, Generic[T], ABC):  # noqa: UP046
         max_retries: int = 3,
         backoff_factor: float = 1.0,
     ) -> None:
+        super().__init__()
         self.client = client
         self.repo_identifier = repo_identifier
         self.logger = logger or get_logger(self.__class__.__name__)
@@ -37,30 +36,3 @@ class BaseGitClient(GitClient, Generic[T], ABC):  # noqa: UP046
 
     def _load_repository(self) -> Any:
         raise NotImplementedError
-
-    def _with_retry(
-        self, func: Callable[..., Any], max_retries: int | None = None
-    ) -> Callable[..., Any]:
-        if max_retries is None:
-            max_retries = self.max_retries
-
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_exception: Exception | None = None
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    last_exception = e
-                    if attempt < max_retries - 1:
-                        wait_time = self.backoff_factor * (2**attempt)
-                        self.logger.warning(
-                            f"Attempt {attempt + 1} failed: {e}. "
-                            f"Retrying in {wait_time}s..."
-                        )
-                        sleep(wait_time)
-            if last_exception:
-                raise last_exception
-            raise RuntimeError("Retry failed with no exception")
-
-        return wrapper

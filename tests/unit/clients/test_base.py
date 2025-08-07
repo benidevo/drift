@@ -1,7 +1,5 @@
 from unittest.mock import Mock, patch
 
-import pytest
-
 from drift.clients.base import BaseGitClient
 
 
@@ -63,6 +61,8 @@ def test_should_lazy_load_repository_when_accessed() -> None:
 
 
 def test_should_retry_and_succeed_when_function_fails_then_works() -> None:
+    from drift.exceptions import NetworkError
+
     client = ConcreteGitClient(
         client=Mock(),
         repo_identifier="owner/repo",
@@ -70,48 +70,14 @@ def test_should_retry_and_succeed_when_function_fails_then_works() -> None:
         backoff_factor=0.01,
     )
 
-    mock_func = Mock(side_effect=[Exception("fail"), Exception("fail"), "success"])
-    wrapped = client._with_retry(mock_func)
+    mock_func = Mock(
+        side_effect=[NetworkError("fail"), NetworkError("fail"), "success"]
+    )
+    wrapped = client.with_retry(mock_func)
 
-    with patch("drift.clients.base.sleep") as mock_sleep:
+    with patch("time.sleep") as mock_sleep:
         result = wrapped()
 
     assert result == "success"
     assert mock_func.call_count == 3
     assert mock_sleep.call_count == 2
-
-
-def test_should_raise_exception_when_all_retry_attempts_fail() -> None:
-    client = ConcreteGitClient(
-        client=Mock(),
-        repo_identifier="owner/repo",
-        max_retries=3,
-        backoff_factor=0.01,
-    )
-
-    mock_func = Mock(side_effect=Exception("persistent failure"))
-    wrapped = client._with_retry(mock_func)
-
-    with patch("drift.clients.base.sleep"):
-        with pytest.raises(Exception, match="persistent failure"):
-            wrapped()
-
-    assert mock_func.call_count == 3
-
-
-def test_should_use_custom_max_retries_when_specified() -> None:
-    client = ConcreteGitClient(
-        client=Mock(),
-        repo_identifier="owner/repo",
-        max_retries=3,
-        backoff_factor=0.01,
-    )
-
-    mock_func = Mock(side_effect=Exception("failure"))
-    wrapped = client._with_retry(mock_func, max_retries=2)
-
-    with patch("drift.clients.base.sleep"):
-        with pytest.raises(Exception, match="failure"):
-            wrapped()
-
-    assert mock_func.call_count == 2

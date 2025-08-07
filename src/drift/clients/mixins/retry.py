@@ -1,8 +1,12 @@
 from collections.abc import Callable
-from functools import wraps
-import secrets
-from time import sleep
-from typing import Any
+from typing import Any, cast
+
+from tenacity import (
+    RetryCallState,
+    retry,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 from drift.exceptions import NetworkError, RateLimitError, TimeoutError
 from drift.logger import get_logger
@@ -26,48 +30,57 @@ class RetryMixin:
             ConnectionError,
         ),
     ) -> Callable[..., Any]:
-        @wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> Any:
-            last_exception: Exception | None = None
+        def wait_strategy(retry_state: RetryCallState) -> float:
+            if retry_state.outcome and retry_state.outcome.failed:
+                exception = retry_state.outcome.exception()
 
-            for attempt in range(max_retries):
-                try:
-                    return func(*args, **kwargs)
-                except retry_on as e:
-                    last_exception = e
-
-                    if isinstance(e, RateLimitError) and e.reset_time:
-                        wait_time = min(e.reset_time, max_wait)
-                        self._retry_logger.warning(
-                            f"Rate limit hit. Waiting {wait_time}s until reset."
-                        )
-                    else:
-                        wait_time = min(backoff_factor * (2**attempt), max_wait)
-
-                        if jitter:
-                            wait_time = wait_time * (
-                                0.5 + secrets.SystemRandom().random()
-                            )
-
-                        self._retry_logger.warning(
-                            f"Attempt {attempt + 1}/{max_retries} failed: {e}. "
-                            f"Retrying in {wait_time:.2f}s..."
-                        )
-
-                    if attempt < max_retries - 1:
-                        sleep(wait_time)
-                except Exception as e:
-                    self._retry_logger.error(
-                        f"Non-retryable error in {func.__name__}: {e}"
+                if isinstance(exception, RateLimitError) and exception.reset_time:
+                    wait_time = min(exception.reset_time, max_wait)
+                    self._retry_logger.warning(
+                        f"Rate limit hit. Waiting {wait_time}s until reset."
                     )
-                    raise
+                    return wait_time
 
-            if last_exception:
-                self._retry_logger.error(
-                    f"Max retries ({max_retries}) exceeded for {func.__name__}"
+            retry_count = retry_state.attempt_number - 1
+
+            if jitter:
+                wait_func = wait_exponential_jitter(
+                    initial=backoff_factor,
+                    max=max_wait,
+                    jitter=max_wait,
                 )
-                raise last_exception
+                return cast(float, wait_func(retry_state))
+            else:
+                wait_time = min(backoff_factor * (2 ** (retry_count - 1)), max_wait)
+                return float(wait_time)
 
-            raise RuntimeError(f"Retry failed for {func.__name__} with no exception")
+        def should_retry(retry_state: RetryCallState) -> bool:
+            if not retry_state.outcome or not retry_state.outcome.failed:
+                return False
 
-        return wrapper
+            exception = retry_state.outcome.exception()
+
+            if not isinstance(exception, retry_on):
+                self._retry_logger.error(
+                    f"Non-retryable error in {func.__name__}: {exception}"
+                )
+                return False
+
+            if not isinstance(exception, RateLimitError):
+                attempt = retry_state.attempt_number
+                self._retry_logger.warning(
+                    f"Attempt {attempt}/{max_retries} failed: {exception}. Retrying..."
+                )
+
+            return True
+
+        retry_decorator = retry(
+            stop=stop_after_attempt(max_retries)
+            if max_retries > 0
+            else stop_after_attempt(1),
+            wait=wait_strategy,
+            retry=should_retry,
+            reraise=True,
+        )
+
+        return cast(Callable[..., Any], retry_decorator(func))
