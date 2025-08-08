@@ -5,7 +5,6 @@ import sys
 def setup_logging(level: str = "INFO") -> None:
     logger = logging.getLogger("drift")
 
-    # Only add handler if none exist (avoid duplicates)
     if not logger.handlers:
         formatter = logging.Formatter(
             fmt="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -17,3 +16,7 @@ def setup_logging(level: str = "INFO") -> None:
         logger.addHandler(handler)
 
     logger.setLevel(level)
+
+
+def get_logger(name: str) -> logging.Logger:
+    return logging.getLogger(f"drift.{name}")
