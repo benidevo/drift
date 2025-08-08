@@ -142,17 +142,16 @@ class DriftConfig:
         if not token:
             raise ConfigurationError("authentication.token not specified")
 
-        expanded_token = os.path.expandvars(token)
-
-        if re.search(
-            r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*(?![A-Za-z0-9_])", expanded_token
-        ):
-            raise ConfigurationError(
-                "Token contains unexpanded environment variables. "
-                "Please ensure all environment variables in the token are set."
-            )
-
-        token = expanded_token
+        if re.search(r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*(?![A-Za-z0-9_])", token):
+            expanded_token = os.path.expandvars(token)
+            if re.search(
+                r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*(?![A-Za-z0-9_])", expanded_token
+            ):
+                raise ConfigurationError(
+                    "Token contains unexpanded environment variables. "
+                    "Please ensure all environment variables are set."
+                )
+            token = expanded_token
 
         repo = data.get("repository")
         if not repo:
