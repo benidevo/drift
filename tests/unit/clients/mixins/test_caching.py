@@ -4,7 +4,7 @@ from unittest.mock import Mock
 from drift.clients.mixins.caching import CacheMixin
 
 
-class TestCacheClass(CacheMixin):
+class CacheTestHelper(CacheMixin):
     def __init__(self, cache_ttl: int = 300, cache_max_size: int = 500) -> None:
         self.cache_ttl = cache_ttl
         self.cache_max_size = cache_max_size
@@ -12,7 +12,7 @@ class TestCacheClass(CacheMixin):
 
 
 def test_should_return_cached_value_when_cache_hit_occurs() -> None:
-    instance = TestCacheClass(cache_ttl=60)
+    instance = CacheTestHelper(cache_ttl=60)
     mock_func = Mock(return_value="result")
 
     @instance.with_cache(ttl=60)
@@ -28,7 +28,7 @@ def test_should_return_cached_value_when_cache_hit_occurs() -> None:
 
 
 def test_should_call_function_when_cache_miss_occurs() -> None:
-    instance = TestCacheClass(cache_ttl=60)
+    instance = CacheTestHelper(cache_ttl=60)
     mock_func = Mock(return_value="result")
 
     @instance.with_cache(ttl=60)
@@ -44,7 +44,7 @@ def test_should_call_function_when_cache_miss_occurs() -> None:
 
 
 def test_should_refresh_cache_when_entry_expires() -> None:
-    instance = TestCacheClass(cache_ttl=1)
+    instance = CacheTestHelper(cache_ttl=1)
     mock_func = Mock(side_effect=["result1", "result2"])
 
     instance._cache = type(instance._cache)(maxsize=500, ttl=0.01)
@@ -63,7 +63,7 @@ def test_should_refresh_cache_when_entry_expires() -> None:
 
 
 def test_should_not_cache_when_ttl_is_zero() -> None:
-    instance = TestCacheClass(cache_ttl=0)
+    instance = CacheTestHelper(cache_ttl=0)
     mock_func = Mock(return_value="result")
 
     @instance.with_cache()
@@ -79,7 +79,7 @@ def test_should_not_cache_when_ttl_is_zero() -> None:
 
 
 def test_should_clear_all_entries_when_clear_cache_called() -> None:
-    instance = TestCacheClass()
+    instance = CacheTestHelper()
 
     instance._cache["key1"] = "value1"
     instance._cache["key2"] = "value2"
@@ -91,7 +91,7 @@ def test_should_clear_all_entries_when_clear_cache_called() -> None:
 
 
 def test_should_clear_matching_entries_when_pattern_is_provided() -> None:
-    instance = TestCacheClass()
+    instance = CacheTestHelper()
 
     instance._cache["test_key1"] = "value1"
     instance._cache["test_key2"] = "value2"

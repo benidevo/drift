@@ -55,10 +55,10 @@ class PaginationMixin:
         max_items: int | None = None,
     ) -> list[T]:
         if max_items is None:
-            max_items = 1000
-            self._pagination_logger.warning(
-                "Using default max_items=1000. "
-                "For large datasets, specify explicit limit."
+            max_items = 100
+            self._pagination_logger.info(
+                "Using default max_items=100. "
+                "For larger datasets, specify explicit limit."
             )
 
         results: list[T] = []

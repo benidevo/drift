@@ -6,13 +6,13 @@ from drift.clients.mixins.retry import RetryMixin
 from drift.exceptions import NetworkError, RateLimitError, TimeoutError
 
 
-class TestRetryClass(RetryMixin):
+class RetryTestHelper(RetryMixin):
     def __init__(self) -> None:
         super().__init__()
 
 
 def test_should_succeed_on_first_attempt_when_function_works() -> None:
-    instance = TestRetryClass()
+    instance = RetryTestHelper()
     mock_func = Mock(return_value="success")
 
     wrapped = instance.with_retry(mock_func)
@@ -23,7 +23,7 @@ def test_should_succeed_on_first_attempt_when_function_works() -> None:
 
 
 def test_should_retry_and_succeed_when_function_eventually_works() -> None:
-    instance = TestRetryClass()
+    instance = RetryTestHelper()
     mock_func = Mock(side_effect=[NetworkError("fail"), "success"])
 
     wrapped = instance.with_retry(mock_func, max_retries=3, backoff_factor=0.01)
@@ -37,7 +37,7 @@ def test_should_retry_and_succeed_when_function_eventually_works() -> None:
 
 
 def test_should_raise_exception_when_all_retry_attempts_fail() -> None:
-    instance = TestRetryClass()
+    instance = RetryTestHelper()
     mock_func = Mock(side_effect=NetworkError("persistent failure"))
     mock_func.__name__ = "mock_func"
 
@@ -51,7 +51,7 @@ def test_should_raise_exception_when_all_retry_attempts_fail() -> None:
 
 
 def test_should_use_exponential_backoff_when_jitter_is_disabled() -> None:
-    instance = TestRetryClass()
+    instance = RetryTestHelper()
     mock_func = Mock(
         side_effect=[TimeoutError("fail"), TimeoutError("fail"), "success"]
     )
@@ -81,7 +81,7 @@ def test_should_use_exponential_backoff_when_jitter_is_disabled() -> None:
 
 
 def test_should_respect_max_wait_when_backoff_exceeds_limit() -> None:
-    instance = TestRetryClass()
+    instance = RetryTestHelper()
     mock_func = Mock(side_effect=[NetworkError("fail")] * 5 + ["success"])
 
     wrapped = instance.with_retry(
@@ -105,7 +105,7 @@ def test_should_respect_max_wait_when_backoff_exceeds_limit() -> None:
 
 
 def test_should_wait_reset_time_when_rate_limit_error_occurs() -> None:
-    instance = TestRetryClass()
+    instance = RetryTestHelper()
     mock_func = Mock(
         side_effect=[
             RateLimitError(3, "Rate limited"),
@@ -133,7 +133,7 @@ def test_should_wait_reset_time_when_rate_limit_error_occurs() -> None:
 
 
 def test_should_not_retry_when_error_is_not_retryable() -> None:
-    instance = TestRetryClass()
+    instance = RetryTestHelper()
     mock_func = Mock(side_effect=ValueError("not retryable"))
     mock_func.__name__ = "mock_func"
 
@@ -150,7 +150,7 @@ def test_should_not_retry_when_error_is_not_retryable() -> None:
 
 
 def test_should_handle_zero_retries_correctly() -> None:
-    instance = TestRetryClass()
+    instance = RetryTestHelper()
     mock_func = Mock(return_value="success")
 
     wrapped = instance.with_retry(mock_func, max_retries=0)

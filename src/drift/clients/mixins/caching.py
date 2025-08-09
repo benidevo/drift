@@ -74,5 +74,4 @@ class CacheMixin:
             "total_entries": len(self._cache),
             "max_size": self._cache.maxsize,
             "ttl": self._cache.ttl,
-            "cache_keys": list(self._cache.keys()),
         }

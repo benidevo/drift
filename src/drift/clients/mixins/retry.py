@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, cast
+from typing import Any
 
 from tenacity import (
     RetryCallState,
@@ -49,7 +49,7 @@ class RetryMixin:
                     max=max_wait,
                     jitter=max_wait,
                 )
-                return cast(float, wait_func(retry_state))
+                return wait_func(retry_state)
             else:
                 exponent = max(retry_count, 0)
                 wait_time = min(backoff_factor * (2**exponent), max_wait)
@@ -84,4 +84,4 @@ class RetryMixin:
             reraise=True,
         )
 
-        return cast(Callable[..., Any], retry_decorator(func))
+        return retry_decorator(func)
