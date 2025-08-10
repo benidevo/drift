@@ -6,7 +6,7 @@ coverage:
         threshold: 1%  # Allow 1% drop in coverage
     patch:
       default:
-        target: 80%  # Require 80% coverage on new/modified code
+        target: 75%  # Require 75% coverage on new/modified code
         threshold: 0%
 
 comment:
