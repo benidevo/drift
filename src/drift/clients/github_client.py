@@ -1,6 +1,5 @@
 import hashlib
 import json
-import re
 import secrets
 from typing import Any
 
@@ -51,48 +50,74 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
         )
         self._cache: TTLCache[str, Any] = TTLCache(maxsize=cache_maxsize, ttl=cache_ttl)
         self._cache_ttl = cache_ttl
-        self._cache_salt = secrets.token_hex(8)
+        self._cache_salt = secrets.token_hex(16)
         self.per_page = min(per_page, 100)
         self.mapper = GitHubMapper()
         self._validate_repo_identifier(repo_identifier)
 
     def _make_cache_key(self, *args: Any, **kwargs: Any) -> str:
-        """Generate secure cache key with salt."""
+        """Generate secure cache key with salt and collision resistance."""
         key_data = {
             "class": self.__class__.__name__,
             "salt": self._cache_salt,
-            "repo": hashlib.sha256(self.repo_identifier.encode()).hexdigest()[:8],
-            "args": [str(arg) for arg in args],
-            "kwargs": {k: str(v) for k, v in sorted(kwargs.items())},
+            "repo": hashlib.sha256(self.repo_identifier.encode()).hexdigest()[:16],
+            "args": [
+                hashlib.sha256(str(arg).encode()).hexdigest()[:16] for arg in args
+            ],
+            "kwargs": {
+                k: hashlib.sha256(str(v).encode()).hexdigest()[:16]
+                for k, v in sorted(kwargs.items())
+            },
         }
         key_str = json.dumps(key_data, sort_keys=True)
-        return hashlib.sha256(key_str.encode()).hexdigest()
+        if len(key_str) > 10000:
+            raise ValueError("Cache key too large")
+        return hashlib.sha3_256(key_str.encode()).hexdigest()
 
     @staticmethod
     def _validate_repo_identifier(identifier: str) -> None:
-        """Validate repository identifier format."""
-        pattern = r"^[a-zA-Z0-9\-_.]+/[a-zA-Z0-9\-_.]+$"
-        if not re.match(pattern, identifier):
+        """Validate repository identifier format with length limits."""
+        if len(identifier) > 255:
+            raise ValueError("Repository identifier too long")
+
+        parts = identifier.split("/")
+        if len(parts) != 2:
             raise ValueError("Invalid repository identifier format")
 
+        owner, repo = parts
+        if not (1 <= len(owner) <= 39 and 1 <= len(repo) <= 100):
+            raise ValueError("Invalid repository identifier length")
+
+        valid_chars = set(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_."
+        )
+        if not all(c in valid_chars for c in owner + repo):
+            raise ValueError("Invalid characters in repository identifier")
+
     def _validate_pr_id(self, pr_id: str) -> int:
-        """Validate and convert PR ID to prevent injection."""
+        """Validate and convert PR ID with proper bounds checking."""
+        if not isinstance(pr_id, str | int):
+            raise ResourceNotFoundError("Invalid PR identifier type")
+
         try:
             pr_int = int(pr_id)
-            if pr_int <= 0 or pr_int > 999999:
-                raise ValueError("Invalid PR ID range")
+            if not (1 <= pr_int <= 2147483647):
+                raise ValueError("PR ID out of valid range")
             return pr_int
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError, OverflowError) as e:
             raise ResourceNotFoundError("Invalid PR identifier") from e
 
     def _validate_comment_id(self, comment_id: str) -> int:
-        """Validate and convert comment ID."""
+        """Validate and convert comment ID with proper bounds checking."""
+        if not isinstance(comment_id, str | int):
+            raise ResourceNotFoundError("Invalid comment identifier type")
+
         try:
             comment_int = int(comment_id)
-            if comment_int <= 0:
-                raise ValueError("Invalid comment ID")
+            if not (1 <= comment_int <= 2147483647):
+                raise ValueError("Comment ID out of valid range")
             return comment_int
-        except (ValueError, TypeError) as e:
+        except (ValueError, TypeError, OverflowError) as e:
             raise ResourceNotFoundError("Invalid comment identifier") from e
 
     def _sanitize_error_message(self, error: Exception, context: str) -> str:
@@ -140,11 +165,9 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
             result = self.mapper.to_pull_request_info(pr)
             self._cache[cache_key] = result
             return result
-        except ValueError as e:
-            if "Invalid GitHub PR data" in str(e):
-                raise
-            raise ResourceNotFoundError(f"Pull request {pr_id} not found") from e
         except Exception as e:
+            if isinstance(e, ValueError) and "Invalid GitHub PR data" in str(e):
+                raise  # Let validation errors bubble up
             if "404" in str(e):
                 raise ResourceNotFoundError("Pull request not found") from e
             msg = self._sanitize_error_message(e, "PR info retrieval")
@@ -267,11 +290,14 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
 
     def get_existing_comments(self, pr_id: str) -> list[Comment]:
         pr_int = self._validate_pr_id(pr_id)
+        MAX_TOTAL_COMMENT_SIZE = 10 * 1024 * 1024
+
         try:
             pr: PullRequest = self.with_retry(lambda: self.repo.get_pull(pr_int))()
 
             comments: list[Comment] = []
             comment_count = 0
+            total_size = 0
 
             for issue_comment in self.paginate_github(pr.get_issue_comments()):
                 if comment_count >= self.MAX_COMMENTS_PER_PR:
@@ -279,10 +305,17 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
                         f"Truncating: PR has >{self.MAX_COMMENTS_PER_PR} comments"
                     )
                     break
-                comments.append(
-                    self.mapper.to_comment_from_issue_comment(issue_comment)
-                )
+
+                comment_obj = self.mapper.to_comment_from_issue_comment(issue_comment)
+                comment_size = len(comment_obj.body)
+
+                if total_size + comment_size > MAX_TOTAL_COMMENT_SIZE:
+                    self.logger.warning("Comment size limit exceeded, truncating")
+                    break
+
+                comments.append(comment_obj)
                 comment_count += 1
+                total_size += comment_size
 
             for review_comment in self.paginate_github(pr.get_comments()):
                 if comment_count >= self.MAX_COMMENTS_PER_PR:
@@ -290,10 +323,17 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
                         f"Truncating: PR has >{self.MAX_COMMENTS_PER_PR} comments"
                     )
                     break
-                comments.append(
-                    self.mapper.to_comment_from_review_comment(review_comment)
-                )
+
+                comment_obj = self.mapper.to_comment_from_review_comment(review_comment)
+                comment_size = len(comment_obj.body)
+
+                if total_size + comment_size > MAX_TOTAL_COMMENT_SIZE:
+                    self.logger.warning("Comment size limit exceeded, truncating")
+                    break
+
+                comments.append(comment_obj)
                 comment_count += 1
+                total_size += comment_size
 
             return comments
         except Exception as e:
@@ -307,6 +347,16 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
 
     def post_comment(self, pr_id: str, comment: str) -> None:
         pr_int = self._validate_pr_id(pr_id)
+
+        MAX_COMMENT_SIZE = 65536
+        if len(comment) > MAX_COMMENT_SIZE:
+            msg = f"Comment exceeds maximum size of {MAX_COMMENT_SIZE} characters"
+            raise ValueError(msg)
+
+        invalid_chars = any(ord(c) < 32 and c not in "\n\r\t" for c in comment)
+        if "\x00" in comment or invalid_chars:
+            raise ValueError("Comment contains invalid characters")
+
         try:
             pr: PullRequest = self.with_retry(lambda: self.repo.get_pull(pr_int))()
             self.with_retry(lambda: pr.create_issue_comment(comment))()
@@ -323,6 +373,16 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
     def update_comment(self, pr_id: str, comment_id: str, comment: str) -> None:
         pr_int = self._validate_pr_id(pr_id)
         comment_int = self._validate_comment_id(comment_id)
+
+        MAX_COMMENT_SIZE = 65536
+        if len(comment) > MAX_COMMENT_SIZE:
+            msg = f"Comment exceeds maximum size of {MAX_COMMENT_SIZE} characters"
+            raise ValueError(msg)
+
+        invalid_chars = any(ord(c) < 32 and c not in "\n\r\t" for c in comment)
+        if "\x00" in comment or invalid_chars:
+            raise ValueError("Comment contains invalid characters")
+
         try:
             pr: PullRequest = self.with_retry(lambda: self.repo.get_pull(pr_int))()
             issue_comment = self.with_retry(lambda: pr.get_issue_comment(comment_int))()
