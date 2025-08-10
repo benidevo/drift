@@ -29,6 +29,10 @@ class ConfigurationError(DriftException):
     pass
 
 
+class SecurityError(DriftException):
+    pass
+
+
 class ValidationError(DriftException):
     pass
 

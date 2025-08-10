@@ -147,9 +147,9 @@ class DriftConfig:
             if re.search(
                 r"\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*(?![A-Za-z0-9_])", expanded_token
             ):
+                # Don't reveal the token value in error message
                 raise ConfigurationError(
-                    "Token contains unexpanded environment variables. "
-                    "Please ensure all environment variables are set."
+                    "Token configuration error: Environment variable not found"
                 )
             token = expanded_token
 

@@ -99,7 +99,8 @@ def test_should_detect_unexpanded_env_vars_in_token() -> None:
     try:
         # Undefined variable should be detected
         with pytest.raises(
-            ConfigurationError, match="Token contains unexpanded environment variables"
+            ConfigurationError,
+            match="Token configuration error: Environment variable not found",
         ):
             DriftConfig.from_file(tmp_path)
     finally:
@@ -114,7 +115,8 @@ def test_should_detect_unexpanded_env_vars_in_token() -> None:
 
     try:
         with pytest.raises(
-            ConfigurationError, match="Token contains unexpanded environment variables"
+            ConfigurationError,
+            match="Token configuration error: Environment variable not found",
         ):
             DriftConfig.from_file(tmp_path)
     finally:

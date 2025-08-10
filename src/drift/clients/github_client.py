@@ -38,6 +38,8 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
             auth=auth,
             base_url=base_url or "https://api.github.com",
             per_page=per_page,
+            timeout=30,
+            pool_size=10,
         )
         logger = logger or get_logger(self.__class__.__name__)
         super().__init__(

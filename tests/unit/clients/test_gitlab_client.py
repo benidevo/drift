@@ -399,7 +399,6 @@ class TestGitLabClient:
     def test_should_prevent_memory_exhaustion_attack(
         self, gitlab_client, mock_mr, mock_project
     ):
-        """Test that memory exhaustion protection works."""
         gitlab_client._repo = mock_project
         mock_project.mergerequests.get.return_value = mock_mr
 

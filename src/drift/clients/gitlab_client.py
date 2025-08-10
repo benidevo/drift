@@ -439,7 +439,6 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             estimated_memory = 0
 
             while len(notes) < self.MAX_COMMENTS_PER_MR and page <= max_pages:
-                # Check memory BEFORE fetching
                 expected_size = per_page * self.ESTIMATED_OBJECT_OVERHEAD
                 if estimated_memory + expected_size > self.MAX_MEMORY_PER_REQUEST:
                     self.logger.warning(
@@ -503,7 +502,6 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             remaining = self.MAX_COMMENTS_PER_MR - len(comments)
 
             while remaining > 0 and page <= max_pages:
-                # Check memory BEFORE fetching
                 expected_size = per_page * self.ESTIMATED_OBJECT_OVERHEAD
                 if estimated_memory + expected_size > self.MAX_MEMORY_PER_REQUEST:
                     self.logger.warning(
