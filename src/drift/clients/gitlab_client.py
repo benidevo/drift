@@ -394,21 +394,23 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                     )
                     break
 
-                note_data: GitLabNote = {
-                    "id": note.id,
-                    "author": {"username": note.author["username"]},
-                    "body": note.body,
-                    "created_at": note.created_at,
-                    "updated_at": (
-                        note.updated_at if hasattr(note, "updated_at") else None
-                    ),
-                    "position": None,
-                }
+                try:
+                    note_data: GitLabNote = {
+                        "id": note.id,
+                        "author": {"username": note.author.get("username", "unknown")},
+                        "body": note.body,
+                        "created_at": note.created_at,
+                        "updated_at": (
+                            note.updated_at if hasattr(note, "updated_at") else None
+                        ),
+                        "position": None,
+                    }
+                    comment = self.mapper.to_comment(note_data)
+                    comments.append(comment)
+                except (AttributeError, KeyError, TypeError) as e:
+                    self.logger.warning(f"Failed to process note in MR {mr_id}: {e}")
+                    continue
 
-                comment = self.mapper.to_comment(note_data)
-                comments.append(comment)
-
-            # Use pagination for discussions as well
             discussions = []
             page = 1
             per_page = 100
@@ -424,38 +426,68 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                     break
                 discussions.extend(batch)
                 page += 1
-                # Count notes in discussions to update remaining (safe access)
+
                 for disc in batch:
-                    attributes = getattr(disc, "attributes", {})
-                    notes_count = len(attributes.get("notes", []))
+                    try:
+                        attributes = getattr(disc, "attributes", {})
+                        notes_list = attributes.get("notes")
+                        notes_count = (
+                            len(notes_list) if isinstance(notes_list, list) else 0
+                        )
+                    except (AttributeError, TypeError):
+                        notes_count = 0
+                        self.logger.warning(
+                            f"Malformed discussion object in MR {mr_id}"
+                        )
                     remaining -= notes_count
                 if remaining <= 0 or len(batch) < per_page:  # No more pages
                     break
+
             for discussion in discussions:
-                for note in discussion.attributes.get("notes", []):
+                try:
+                    discussion_notes = getattr(discussion, "attributes", {}).get(
+                        "notes", []
+                    )
+                except (AttributeError, TypeError):
+                    self.logger.warning(f"Malformed discussion in MR {mr_id}")
+                    continue
+
+                for note in discussion_notes:
                     if len(comments) >= self.MAX_COMMENTS_PER_MR:
                         break
 
-                    position: GitLabPosition | None = None
-                    if "position" in note:
-                        position = GitLabPosition(
-                            new_path=note["position"].get("new_path"),
-                            old_path=note["position"].get("old_path"),
-                            new_line=note["position"].get("new_line"),
-                            old_line=note["position"].get("old_line"),
+                    try:
+                        position: GitLabPosition | None = None
+                        if "position" in note and isinstance(
+                            note.get("position"), dict
+                        ):
+                            position = GitLabPosition(
+                                new_path=note["position"].get("new_path"),
+                                old_path=note["position"].get("old_path"),
+                                new_line=note["position"].get("new_line"),
+                                old_line=note["position"].get("old_line"),
+                            )
+
+                        discussion_note_data: GitLabNote = {
+                            "id": note.get("id", ""),
+                            "author": {
+                                "username": note.get("author", {}).get(
+                                    "username", "unknown"
+                                )
+                            },
+                            "body": note.get("body", ""),
+                            "created_at": note.get("created_at", ""),
+                            "updated_at": note.get("updated_at"),
+                            "position": position,
+                        }
+
+                        comment = self.mapper.to_comment(discussion_note_data)
+                        comments.append(comment)
+                    except (AttributeError, KeyError, TypeError) as e:
+                        self.logger.warning(
+                            f"Failed to process discussion note in MR {mr_id}: {e}"
                         )
-
-                    discussion_note_data: GitLabNote = {
-                        "id": note["id"],
-                        "author": {"username": note["author"]["username"]},
-                        "body": note["body"],
-                        "created_at": note["created_at"],
-                        "updated_at": note.get("updated_at"),
-                        "position": position,
-                    }
-
-                    comment = self.mapper.to_comment(discussion_note_data)
-                    comments.append(comment)
+                        continue
 
             self._cache[cache_key] = comments
             return comments
