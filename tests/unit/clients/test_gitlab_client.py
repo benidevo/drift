@@ -1,9 +1,15 @@
 from unittest.mock import MagicMock, patch
 
+from gitlab.exceptions import GitlabError
 import pytest
 
 from drift.clients.gitlab_client import GitLabClient
-from drift.exceptions import APIError, AuthenticationError, ResourceNotFoundError
+from drift.exceptions import (
+    APIError,
+    AuthenticationError,
+    NetworkError,
+    ResourceNotFoundError,
+)
 from drift.models import Comment, DiffData, FileStatus, PullRequestInfo
 
 
@@ -378,3 +384,109 @@ class TestGitLabClient:
             gitlab_client.get_pr_info("123")
 
         assert "Failed to get MR info" in str(exc_info.value)
+
+    def test_should_prevent_memory_exhaustion_attack(
+        self, gitlab_client, mock_mr, mock_project
+    ):
+        """Test that memory exhaustion protection works."""
+        gitlab_client._repo = mock_project
+        mock_project.mergerequests.get.return_value = mock_mr
+
+        large_body = "x" * 100000
+        mock_notes = []
+        for i in range(600):
+            mock_note = MagicMock(
+                id=i,
+                author={"username": f"user{i}"},
+                body=large_body,
+                created_at="2024-01-01T10:00:00Z",
+                updated_at=None,
+            )
+            mock_note.__dict__ = {"body": large_body, "id": i}
+            mock_notes.append(mock_note)
+
+        def mock_list(**kwargs):
+            page = kwargs.get("page", 1)
+            per_page = kwargs.get("per_page", 100)
+            start = (page - 1) * per_page
+            end = start + per_page
+            return mock_notes[start:end] if start < len(mock_notes) else []
+
+        mock_mr.notes.list.side_effect = mock_list
+        mock_mr.discussions.list.side_effect = lambda **kwargs: []
+
+        with pytest.raises(APIError) as exc_info:
+            gitlab_client.get_existing_comments("123")
+
+        assert "Failed to get comments for MR 123" in str(exc_info.value)
+
+    def test_should_handle_gitlab_transient_errors(self, gitlab_client, mock_project):
+        gitlab_client._repo = mock_project
+
+        gitlab_error = GitlabError("Service Unavailable")
+        gitlab_error.response_code = 503
+        mock_project.mergerequests.get.side_effect = gitlab_error
+
+        with pytest.raises(NetworkError) as exc_info:
+            gitlab_client._fetch_with_transient_error_handling(
+                lambda: mock_project.mergerequests.get(123)
+            )
+
+        assert "temporarily unavailable" in str(exc_info.value).lower()
+        assert "503" in str(exc_info.value)
+
+    def test_should_handle_gitlab_transient_errors_in_load_repository(
+        self, gitlab_client
+    ):
+        gitlab_error = GitlabError("Bad Gateway")
+        gitlab_error.response_code = 502
+
+        gitlab_client.client.auth.return_value = None
+        gitlab_client.client.projects.get.side_effect = gitlab_error
+
+        with pytest.raises(NetworkError) as exc_info:
+            gitlab_client._load_repository()
+
+        assert "temporarily unavailable" in str(exc_info.value).lower()
+        assert "502" in str(exc_info.value)
+
+    def test_should_handle_gitlab_404_error_in_get_pr_info(
+        self, gitlab_client, mock_project
+    ):
+        gitlab_client._repo = mock_project
+
+        gitlab_error = GitlabError("Not Found")
+        gitlab_error.response_code = 404
+        mock_project.mergerequests.get.side_effect = gitlab_error
+
+        with pytest.raises(ResourceNotFoundError) as exc_info:
+            gitlab_client.get_pr_info("123")
+
+        assert "Merge request not found" in str(exc_info.value)
+
+    def test_should_estimate_object_size_with_dict(self, gitlab_client):
+        mock_obj = MagicMock()
+        mock_obj.__dict__ = {"data": "x" * 1000, "id": 123}
+
+        size = gitlab_client._estimate_object_size(mock_obj)
+
+        assert size > 1000
+        assert (
+            size
+            >= len(str(mock_obj.__dict__)) + gitlab_client.ESTIMATED_OBJECT_OVERHEAD
+        )
+
+    def test_should_estimate_object_size_with_sizeof(self, gitlab_client):
+        obj = 12345
+
+        size = gitlab_client._estimate_object_size(obj)
+
+        actual_sizeof = obj.__sizeof__()
+        assert size == actual_sizeof + gitlab_client.ESTIMATED_OBJECT_OVERHEAD
+
+    def test_should_estimate_object_size_fallback(self, gitlab_client):
+        obj = 42
+
+        size = gitlab_client._estimate_object_size(obj)
+
+        assert size >= gitlab_client.ESTIMATED_OBJECT_OVERHEAD

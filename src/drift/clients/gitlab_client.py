@@ -7,6 +7,7 @@ from typing import Any
 
 from cachetools import TTLCache
 from gitlab import Gitlab
+from gitlab.exceptions import GitlabError
 
 from drift.adapters.gitlab_mapper import (
     GitLabChange,
@@ -29,11 +30,14 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
     MAX_COMMITS_PER_MR = 500
 
     SENSITIVE_PATTERNS = [
-        re.compile(r"token[=:]\S+", re.IGNORECASE),
-        re.compile(r"api[_-]?key[=:]\S+", re.IGNORECASE),
-        re.compile(r"password[=:]\S+", re.IGNORECASE),
-        re.compile(r"secret[=:]\S+", re.IGNORECASE),
+        re.compile(r"token[=:][\S]{1,100}", re.IGNORECASE),
+        re.compile(r"api[_-]?key[=:][\S]{1,100}", re.IGNORECASE),
+        re.compile(r"password[=:][\S]{1,100}", re.IGNORECASE),
+        re.compile(r"secret[=:][\S]{1,100}", re.IGNORECASE),
     ]
+
+    MAX_MEMORY_PER_REQUEST = 50 * 1024 * 1024
+    ESTIMATED_OBJECT_OVERHEAD = 2048
 
     def __init__(
         self,
@@ -51,7 +55,7 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             url=base_url or "https://gitlab.com",
             private_token=token,
             per_page=per_page,
-            timeout=30,  # Add connection timeout
+            timeout=30,
         )
         logger = logger or get_logger(self.__class__.__name__)
         super().__init__(
@@ -79,18 +83,18 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
         truncated_args = []
         for arg in args[:MAX_ARGS]:
             arg_str = str(arg)[:MAX_ARG_SIZE]
-            truncated_args.append(hashlib.sha256(arg_str.encode()).hexdigest()[:16])
+            truncated_args.append(hashlib.sha256(arg_str.encode()).hexdigest()[:32])
 
         truncated_kwargs = {}
         for k, v in sorted(kwargs.items())[:MAX_ARGS]:
             k_str = str(k)[:50]
             v_str = str(v)[:MAX_ARG_SIZE]
-            truncated_kwargs[k_str] = hashlib.sha256(v_str.encode()).hexdigest()[:16]
+            truncated_kwargs[k_str] = hashlib.sha256(v_str.encode()).hexdigest()[:32]
 
         key_data = {
             "class": self.__class__.__name__,
-            "salt": self._cache_salt[:16],
-            "repo": hashlib.sha256(self.repo_identifier.encode()).hexdigest()[:16],
+            "salt": self._cache_salt[:32],
+            "repo": hashlib.sha256(self.repo_identifier.encode()).hexdigest()[:32],
             "args": truncated_args,
             "kwargs": truncated_kwargs,
         }
@@ -102,7 +106,6 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
         if len(identifier) > 255:
             raise ValueError("Repository identifier too long")
 
-        # GitLab supports both numeric project IDs and namespace/project paths
         if identifier.isdigit():
             if not (1 <= int(identifier) <= 2147483647):
                 raise ValueError("Invalid project ID range")
@@ -152,6 +155,26 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
 
         return f"{context}: {error_msg}"
 
+    def _estimate_object_size(self, obj: Any) -> int:
+        if hasattr(obj, "__dict__"):
+            return len(str(obj.__dict__)) + self.ESTIMATED_OBJECT_OVERHEAD
+        elif hasattr(obj, "__sizeof__"):
+            return int(obj.__sizeof__()) + self.ESTIMATED_OBJECT_OVERHEAD
+        else:
+            return self.ESTIMATED_OBJECT_OVERHEAD
+
+    def _fetch_with_transient_error_handling(self, fetch_func: Any) -> Any:
+        try:
+            return fetch_func()
+        except GitlabError as e:
+            if hasattr(e, "response_code") and e.response_code in [502, 503, 504]:
+                from drift.exceptions import NetworkError
+
+                raise NetworkError(
+                    f"GitLab service temporarily unavailable: {e.response_code}"
+                ) from e
+            raise
+
     def _load_repository(self) -> Any:
         try:
             self.client.auth()
@@ -160,6 +183,25 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                 return self.client.projects.get(int(self.repo_identifier))
             else:
                 return self.client.projects.get(self.repo_identifier)
+        except GitlabError as e:
+            if hasattr(e, "response_code") and e.response_code in [502, 503, 504]:
+                from drift.exceptions import NetworkError
+
+                raise NetworkError(
+                    f"GitLab service temporarily unavailable: {e.response_code}"
+                ) from e
+            elif "401" in str(e) or "Unauthorized" in str(e):
+                raise AuthenticationError(
+                    self._sanitize_error_message(e, "Authentication failed")
+                ) from e
+            elif "404" in str(e) or "Not Found" in str(e):
+                raise ResourceNotFoundError(
+                    f"Repository not found: {self.repo_identifier}"
+                ) from e
+            else:
+                raise APIError(
+                    message=self._sanitize_error_message(e, "Failed to load repository")
+                ) from e
         except Exception as e:
             if "401" in str(e) or "Unauthorized" in str(e):
                 raise AuthenticationError(
@@ -183,7 +225,11 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             return self._cache[cache_key]  # type: ignore[no-any-return]
 
         try:
-            mr = self.with_retry(lambda: self.repo.mergerequests.get(mr_id))()
+            mr = self.with_retry(
+                lambda: self._fetch_with_transient_error_handling(
+                    lambda: self.repo.mergerequests.get(mr_id)
+                )
+            )()
 
             mr_data: GitLabMergeRequest = {
                 "iid": mr.iid,
@@ -202,6 +248,21 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             return result
         except ResourceNotFoundError:
             raise
+        except GitlabError as e:
+            if hasattr(e, "response_code") and e.response_code in [502, 503, 504]:
+                from drift.exceptions import NetworkError
+
+                raise NetworkError(
+                    f"GitLab service temporarily unavailable: {e.response_code}"
+                ) from e
+            elif (
+                "404" in str(e) or e.response_code == 404
+                if hasattr(e, "response_code")
+                else False
+            ):
+                raise ResourceNotFoundError(f"Merge request not found: {mr_id}") from e
+            msg = self._sanitize_error_message(e, f"Failed to get MR info for {mr_id}")
+            raise APIError(message=msg) from e
         except Exception as e:
             if "404" in str(e):
                 raise ResourceNotFoundError(f"Merge request not found: {mr_id}") from e
@@ -369,7 +430,9 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             notes: list[Any] = []
             page = 1
             per_page = 100
-            max_pages = 50  # Prevent infinite loops
+            max_pages = 50
+            estimated_memory = 0
+
             while len(notes) < self.MAX_COMMENTS_PER_MR and page <= max_pages:
                 batch = self.with_retry(
                     lambda p=page: mr.notes.list(
@@ -380,9 +443,21 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                 )()
                 if not batch:
                     break
+
+                batch_memory = sum(self._estimate_object_size(note) for note in batch)
+                if estimated_memory + batch_memory > self.MAX_MEMORY_PER_REQUEST:
+                    self.logger.error(
+                        f"Memory limit exceeded for MR {mr_id}: "
+                        f"{estimated_memory + batch_memory} bytes"
+                    )
+                    raise APIError(
+                        message=f"Comment data exceeds limits for MR {mr_id}"
+                    )
+
                 notes.extend(batch)
+                estimated_memory += batch_memory
                 page += 1
-                if len(batch) < per_page:  # No more pages
+                if len(batch) < per_page:
                     break
 
             comments = []
@@ -414,8 +489,9 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             discussions = []
             page = 1
             per_page = 100
-            max_pages = 50  # Prevent infinite loops
+            max_pages = 50
             remaining = self.MAX_COMMENTS_PER_MR - len(comments)
+
             while remaining > 0 and page <= max_pages:
                 batch = self.with_retry(
                     lambda p=page, r=remaining: mr.discussions.list(
@@ -424,7 +500,16 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                 )()
                 if not batch:
                     break
+
+                batch_memory = sum(self._estimate_object_size(disc) for disc in batch)
+                if estimated_memory + batch_memory > self.MAX_MEMORY_PER_REQUEST:
+                    self.logger.warning(
+                        f"Skipping discussions for MR {mr_id}: memory limit"
+                    )
+                    break
+
                 discussions.extend(batch)
+                estimated_memory += batch_memory
                 page += 1
 
                 for disc in batch:
@@ -440,7 +525,10 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                             f"Malformed discussion object in MR {mr_id}"
                         )
                     remaining -= notes_count
-                if remaining <= 0 or len(batch) < per_page:  # No more pages
+                    if remaining <= 0:
+                        break
+
+                if remaining <= 0 or len(batch) < per_page:
                     break
 
             for discussion in discussions:
@@ -509,13 +597,12 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             raise ValueError("Comment is too long")
 
         try:
-            mr = self.with_retry(lambda: self.repo.mergerequests.get(mr_id))()
-
-            self.with_retry(lambda: mr.notes.create({"body": comment}))()
-
             cache_key = f"comments:{self._make_cache_key(pr_id)}"
             if cache_key in self._cache:
                 del self._cache[cache_key]
+
+            mr = self.with_retry(lambda: self.repo.mergerequests.get(mr_id))()
+            self.with_retry(lambda: mr.notes.create({"body": comment}))()
 
             self.logger.info(f"Posted comment to MR {mr_id}")
         except ResourceNotFoundError:
@@ -537,16 +624,14 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             raise ValueError("Comment is too long")
 
         try:
-            mr = self.with_retry(lambda: self.repo.mergerequests.get(mr_id))()
-
-            note = self.with_retry(lambda: mr.notes.get(note_id))()
-
-            note.body = comment
-            self.with_retry(lambda: note.save())()
-
             cache_key = f"comments:{self._make_cache_key(pr_id)}"
             if cache_key in self._cache:
                 del self._cache[cache_key]
+
+            mr = self.with_retry(lambda: self.repo.mergerequests.get(mr_id))()
+            note = self.with_retry(lambda: mr.notes.get(note_id))()
+            note.body = comment
+            self.with_retry(lambda: note.save())()
 
             self.logger.info(f"Updated comment {note_id} in MR {mr_id}")
         except ResourceNotFoundError:
