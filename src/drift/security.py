@@ -43,22 +43,29 @@ class SecurityValidator:
         if not path:
             raise ValueError("Output path cannot be empty")
 
-        # Expand user home directory first
         expanded_path = Path(path).expanduser()
+        expanded_str = str(expanded_path)
+        for pattern in SecurityValidator.SENSITIVE_FILE_PATTERNS:
+            if pattern in expanded_str:
+                raise SecurityError("Cannot overwrite sensitive file")
+
+        # Check for forbidden directories BEFORE resolution to prevent symlink bypass
+        for forbidden in SecurityValidator.FORBIDDEN_OUTPUT_DIRS:
+            if str(expanded_path).startswith(forbidden):
+                raise SecurityError(f"Cannot write to system directory: {forbidden}")
+
         resolved = expanded_path.resolve()
 
-        # Check for sensitive files first (before symlink checks)
+        # Double-check after resolution as defense in depth
+        for forbidden in SecurityValidator.FORBIDDEN_OUTPUT_DIRS:
+            if str(resolved).startswith(forbidden):
+                raise SecurityError(f"Cannot write to system directory: {forbidden}")
+
         path_str = str(resolved)
         for pattern in SecurityValidator.SENSITIVE_FILE_PATTERNS:
             if pattern in path_str:
                 raise SecurityError("Cannot overwrite sensitive file")
 
-        # Check for forbidden directories
-        for forbidden in SecurityValidator.FORBIDDEN_OUTPUT_DIRS:
-            if str(resolved).startswith(forbidden):
-                raise SecurityError(f"Cannot write to system directory: {forbidden}")
-
-        # Check for symlinks after sensitive file checks
         if expanded_path.exists() and expanded_path.is_symlink():
             raise SecurityError("Symlinks are not allowed for output paths")
 

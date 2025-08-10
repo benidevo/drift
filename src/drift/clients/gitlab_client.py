@@ -465,7 +465,6 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                     else:
                         actual_batch_size += sys.getsizeof(note)
 
-                # Check if actual size would exceed limit
                 if estimated_memory + actual_batch_size > self.MAX_MEMORY_PER_REQUEST:
                     self.logger.warning(
                         f"Stopping comment fetch for MR {mr_id}: "
