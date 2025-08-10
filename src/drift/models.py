@@ -9,7 +9,7 @@ class FileStatus(StrEnum):
     RENAMED = "renamed"
 
 
-@dataclass
+@dataclass(frozen=True)
 class PullRequestInfo:
     id: str
     title: str
@@ -23,7 +23,7 @@ class PullRequestInfo:
     updated_at: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class FileChange:
     path: str
     old_path: str | None
@@ -33,7 +33,7 @@ class FileChange:
     patch: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class Comment:
     """Can be either a general comment or line-specific review comment."""
 
@@ -48,7 +48,7 @@ class Comment:
     line_to: int | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class DiffData:
     files: list[FileChange]
     total_additions: int

@@ -10,8 +10,6 @@ class GitProvider(StrEnum):
 
 
 class GitClient(ABC):
-    """Interface for Git provider operations."""
-
     @abstractmethod
     def get_pr_info(self, pr_id: str) -> PullRequestInfo:
         raise NotImplementedError
@@ -26,10 +24,6 @@ class GitClient(ABC):
 
     @abstractmethod
     def get_pr_context(self, pr_id: str) -> dict[str, str]:
-        """Parse business context from PR description.
-
-        Returns sections like 'context', 'requirements', etc.
-        """
         raise NotImplementedError
 
     @abstractmethod
