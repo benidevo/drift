@@ -320,7 +320,9 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                 "mergeable": (
                     str(mr.mergeable) if hasattr(mr, "mergeable") else "unknown"
                 ),
-                "pipeline_status": mr.pipeline["status"] if mr.pipeline else "none",
+                "pipeline_status": (
+                    mr.pipeline.get("status", "none") if mr.pipeline else "none"
+                ),
                 "approvals_required": (
                     str(mr.approvals_required)
                     if hasattr(mr, "approvals_required")
@@ -334,8 +336,12 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                     if hasattr(mr, "discussion_locked")
                     else "false"
                 ),
-                "assignee": mr.assignee["username"] if mr.assignee else "none",
-                "milestone": mr.milestone["title"] if mr.milestone else "none",
+                "assignee": (
+                    mr.assignee.get("username", "none") if mr.assignee else "none"
+                ),
+                "milestone": (
+                    mr.milestone.get("title", "none") if mr.milestone else "none"
+                ),
                 "labels": ", ".join(mr.labels) if mr.labels else "none",
             }
 
@@ -363,7 +369,8 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             notes: list[Any] = []
             page = 1
             per_page = 100
-            while len(notes) < self.MAX_COMMENTS_PER_MR:
+            max_pages = 50  # Prevent infinite loops
+            while len(notes) < self.MAX_COMMENTS_PER_MR and page <= max_pages:
                 batch = self.with_retry(
                     lambda p=page: mr.notes.list(
                         page=p,
@@ -405,8 +412,9 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             discussions = []
             page = 1
             per_page = 100
+            max_pages = 50  # Prevent infinite loops
             remaining = self.MAX_COMMENTS_PER_MR - len(comments)
-            while remaining > 0:
+            while remaining > 0 and page <= max_pages:
                 batch = self.with_retry(
                     lambda p=page, r=remaining: mr.discussions.list(
                         page=p, per_page=min(per_page, r), get_all=False
@@ -416,9 +424,11 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                     break
                 discussions.extend(batch)
                 page += 1
-                # Count notes in discussions to update remaining
+                # Count notes in discussions to update remaining (safe access)
                 for disc in batch:
-                    remaining -= len(disc.attributes.get("notes", []))
+                    attributes = getattr(disc, "attributes", {})
+                    notes_count = len(attributes.get("notes", []))
+                    remaining -= notes_count
                 if remaining <= 0 or len(batch) < per_page:  # No more pages
                     break
             for discussion in discussions:
