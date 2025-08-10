@@ -34,6 +34,8 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
         re.compile(r"api[_-]?key[=:][\S]{1,100}", re.IGNORECASE),
         re.compile(r"password[=:][\S]{1,100}", re.IGNORECASE),
         re.compile(r"secret[=:][\S]{1,100}", re.IGNORECASE),
+        re.compile(r"glpat-[\S]{20,}", re.IGNORECASE),
+        re.compile(r"private[_-]?token[=:\s]+[\S]{1,100}", re.IGNORECASE),
     ]
 
     MAX_MEMORY_PER_REQUEST = 50 * 1024 * 1024
