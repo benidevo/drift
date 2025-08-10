@@ -99,6 +99,9 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             "kwargs": truncated_kwargs,
         }
         key_str = json.dumps(key_data, sort_keys=True)
+        if len(key_str) > 10000:
+            key = f"oversized:{len(key_str)}:{key_str[:1000]}"
+            return hashlib.sha256(key.encode()).hexdigest()
         return hashlib.sha256(key_str.encode()).hexdigest()
 
     @staticmethod
@@ -145,7 +148,7 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             raise ValueError(f"Invalid comment ID: {comment_id}") from e
 
     def _sanitize_error_message(self, error: Exception, context: str) -> str:
-        error_msg = str(error)
+        error_msg = str(error)[:5000]
 
         for pattern in self.SENSITIVE_PATTERNS:
             error_msg = pattern.sub("[REDACTED]", error_msg)
@@ -192,7 +195,7 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                 ) from e
             elif "401" in str(e) or "Unauthorized" in str(e):
                 raise AuthenticationError(
-                    self._sanitize_error_message(e, "Authentication failed")
+                    "Authentication failed: Invalid or expired token"
                 ) from e
             elif "404" in str(e) or "Not Found" in str(e):
                 raise ResourceNotFoundError(
@@ -205,7 +208,7 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
         except Exception as e:
             if "401" in str(e) or "Unauthorized" in str(e):
                 raise AuthenticationError(
-                    self._sanitize_error_message(e, "Authentication failed")
+                    "Authentication failed: Invalid or expired token"
                 ) from e
             elif "404" in str(e) or "Not Found" in str(e):
                 raise ResourceNotFoundError(
@@ -434,6 +437,14 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             estimated_memory = 0
 
             while len(notes) < self.MAX_COMMENTS_PER_MR and page <= max_pages:
+                # Check memory BEFORE fetching
+                expected_size = per_page * self.ESTIMATED_OBJECT_OVERHEAD
+                if estimated_memory + expected_size > self.MAX_MEMORY_PER_REQUEST:
+                    self.logger.warning(
+                        f"Stopping comment fetch for MR {mr_id}: memory limit"
+                    )
+                    break
+
                 batch = self.with_retry(
                     lambda p=page: mr.notes.list(
                         page=p,
@@ -446,13 +457,10 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
 
                 batch_memory = sum(self._estimate_object_size(note) for note in batch)
                 if estimated_memory + batch_memory > self.MAX_MEMORY_PER_REQUEST:
-                    self.logger.error(
-                        f"Memory limit exceeded for MR {mr_id}: "
-                        f"{estimated_memory + batch_memory} bytes"
+                    self.logger.warning(
+                        f"Stopping comment fetch for MR {mr_id}: actual memory exceeded"
                     )
-                    raise APIError(
-                        message=f"Comment data exceeds limits for MR {mr_id}"
-                    )
+                    break
 
                 notes.extend(batch)
                 estimated_memory += batch_memory
@@ -493,6 +501,14 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             remaining = self.MAX_COMMENTS_PER_MR - len(comments)
 
             while remaining > 0 and page <= max_pages:
+                # Check memory BEFORE fetching
+                expected_size = per_page * self.ESTIMATED_OBJECT_OVERHEAD
+                if estimated_memory + expected_size > self.MAX_MEMORY_PER_REQUEST:
+                    self.logger.warning(
+                        f"Stopping discussion fetch for MR {mr_id}: memory limit"
+                    )
+                    break
+
                 batch = self.with_retry(
                     lambda p=page, r=remaining: mr.discussions.list(
                         page=p, per_page=min(per_page, r), get_all=False
@@ -504,7 +520,7 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                 batch_memory = sum(self._estimate_object_size(disc) for disc in batch)
                 if estimated_memory + batch_memory > self.MAX_MEMORY_PER_REQUEST:
                     self.logger.warning(
-                        f"Skipping discussions for MR {mr_id}: memory limit"
+                        f"Stopping discussion fetch for MR {mr_id}: memory exceeded"
                     )
                     break
 
@@ -604,12 +620,12 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             raise ValueError("Comment is too long")
 
         try:
+            mr = self.with_retry(lambda: self.repo.mergerequests.get(mr_id))()
+            self.with_retry(lambda: mr.notes.create({"body": comment}))()
+
             cache_key = f"comments:{self._make_cache_key(pr_id)}"
             if cache_key in self._cache:
                 del self._cache[cache_key]
-
-            mr = self.with_retry(lambda: self.repo.mergerequests.get(mr_id))()
-            self.with_retry(lambda: mr.notes.create({"body": comment}))()
 
             self.logger.info(f"Posted comment to MR {mr_id}")
         except ResourceNotFoundError:
@@ -631,14 +647,14 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             raise ValueError("Comment is too long")
 
         try:
-            cache_key = f"comments:{self._make_cache_key(pr_id)}"
-            if cache_key in self._cache:
-                del self._cache[cache_key]
-
             mr = self.with_retry(lambda: self.repo.mergerequests.get(mr_id))()
             note = self.with_retry(lambda: mr.notes.get(note_id))()
             note.body = comment
             self.with_retry(lambda: note.save())()
+
+            cache_key = f"comments:{self._make_cache_key(pr_id)}"
+            if cache_key in self._cache:
+                del self._cache[cache_key]
 
             self.logger.info(f"Updated comment {note_id} in MR {mr_id}")
         except ResourceNotFoundError:
