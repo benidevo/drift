@@ -27,11 +27,26 @@ class BaseGitClient(GitClient, RetryMixin, Generic[T], ABC):  # noqa: UP046
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
         self._repo: Any = None
+        self._repo_load_failed: bool = False
 
     @property
     def repo(self) -> Any:
+        if self._repo_load_failed:
+            from drift.exceptions import APIError
+
+            raise APIError(
+                None,
+                "Repository loading failed previously. Please reinitialize the client.",
+            )
+
         if self._repo is None:
-            self._repo = self._load_repository()
+            try:
+                self._repo = self._load_repository()
+            except Exception as e:
+                # Mark as failed to prevent retry storms
+                self._repo_load_failed = True
+                self.logger.error(f"Failed to load repository: {e}")
+                raise
         return self._repo
 
     def _load_repository(self) -> Any:
