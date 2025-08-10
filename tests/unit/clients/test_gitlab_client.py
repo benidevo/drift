@@ -376,6 +376,17 @@ class TestGitLabClient:
         assert "[REDACTED]" in sanitized
         assert "Test context" in sanitized
 
+    def test_should_sanitize_gitlab_specific_tokens(self, gitlab_client):
+        error = Exception(
+            "Error with glpat-abc123defghij1234567890 and PRIVATE-TOKEN: xyz789"
+        )
+        sanitized = gitlab_client._sanitize_error_message(error, "GitLab auth")
+
+        assert "glpat-abc123defghij1234567890" not in sanitized
+        assert "xyz789" not in sanitized
+        assert "[REDACTED]" in sanitized
+        assert sanitized.count("[REDACTED]") == 2
+
     def test_should_handle_api_errors(self, gitlab_client, mock_project):
         gitlab_client._repo = mock_project
         mock_project.mergerequests.get.side_effect = Exception("API error")
