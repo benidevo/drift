@@ -29,6 +29,7 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
         base_url: str | None = None,
         logger: Any | None = None,
         cache_ttl: int = 300,
+        cache_maxsize: int = 500,
         max_retries: int = 3,
         backoff_factor: float = 1.0,
         per_page: int = 100,
@@ -48,7 +49,7 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
             max_retries=max_retries,
             backoff_factor=backoff_factor,
         )
-        self._cache: TTLCache[str, Any] = TTLCache(maxsize=500, ttl=cache_ttl)
+        self._cache: TTLCache[str, Any] = TTLCache(maxsize=cache_maxsize, ttl=cache_ttl)
         self._cache_ttl = cache_ttl
         self._cache_salt = secrets.token_hex(8)
         self.per_page = min(per_page, 100)
@@ -122,7 +123,8 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
                 raise ResourceNotFoundError(
                     self._sanitize_error_message(e, "repository lookup")
                 ) from e
-            self.logger.error("Failed to load repository")
+            msg = self._sanitize_error_message(e, "repository loading")
+            self.logger.error(f"Failed to load repository: {msg}")
             raise APIError(
                 message=self._sanitize_error_message(e, "repository loading")
             ) from e
@@ -145,7 +147,8 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
         except Exception as e:
             if "404" in str(e):
                 raise ResourceNotFoundError("Pull request not found") from e
-            self.logger.error("Failed to get PR info")
+            msg = self._sanitize_error_message(e, "PR info retrieval")
+            self.logger.error(f"Failed to get PR info: {msg}")
             raise APIError(
                 message=self._sanitize_error_message(e, "PR info retrieval")
             ) from e
@@ -180,7 +183,8 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
         except Exception as e:
             if "404" in str(e):
                 raise ResourceNotFoundError("Pull request not found") from e
-            self.logger.error("Failed to get diff data")
+            msg = self._sanitize_error_message(e, "diff data retrieval")
+            self.logger.error(f"Failed to get diff data: {msg}")
             raise APIError(
                 message=self._sanitize_error_message(e, "diff data retrieval")
             ) from e
@@ -210,7 +214,8 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
         except Exception as e:
             if "404" in str(e):
                 raise ResourceNotFoundError("Pull request not found") from e
-            self.logger.error("Failed to get commit messages")
+            msg = self._sanitize_error_message(e, "commit message retrieval")
+            self.logger.error(f"Failed to get commit messages: {msg}")
             raise APIError(
                 message=self._sanitize_error_message(e, "commit message retrieval")
             ) from e
@@ -254,7 +259,8 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
         except Exception as e:
             if "404" in str(e):
                 raise ResourceNotFoundError("Pull request not found") from e
-            self.logger.error("Failed to get PR context")
+            msg = self._sanitize_error_message(e, "PR context retrieval")
+            self.logger.error(f"Failed to get PR context: {msg}")
             raise APIError(
                 message=self._sanitize_error_message(e, "PR context retrieval")
             ) from e
@@ -293,7 +299,8 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
         except Exception as e:
             if "404" in str(e):
                 raise ResourceNotFoundError("Pull request not found") from e
-            self.logger.error("Failed to get comments")
+            msg = self._sanitize_error_message(e, "comment retrieval")
+            self.logger.error(f"Failed to get comments: {msg}")
             raise APIError(
                 message=self._sanitize_error_message(e, "comment retrieval")
             ) from e
@@ -307,7 +314,8 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
         except Exception as e:
             if "404" in str(e):
                 raise ResourceNotFoundError("Pull request not found") from e
-            self.logger.error("Failed to post comment")
+            msg = self._sanitize_error_message(e, "comment posting")
+            self.logger.error(f"Failed to post comment: {msg}")
             raise APIError(
                 message=self._sanitize_error_message(e, "comment posting")
             ) from e
@@ -323,7 +331,8 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
         except Exception as e:
             if "404" in str(e):
                 raise ResourceNotFoundError("Comment or pull request not found") from e
-            self.logger.error("Failed to update comment")
+            msg = self._sanitize_error_message(e, "comment update")
+            self.logger.error(f"Failed to update comment: {msg}")
             raise APIError(
                 message=self._sanitize_error_message(e, "comment update")
             ) from e

@@ -59,12 +59,14 @@ def test_should_initialize_github_client_with_valid_config(mock_github, mock_aut
         token="token",
         repo_identifier="owner/repo",
         cache_ttl=600,
+        cache_maxsize=1000,
         max_retries=5,
     )
 
     assert client.repo_identifier == "owner/repo"
     assert client.cache_ttl == 600
     assert client.max_retries == 5
+    assert client._cache.maxsize == 1000
     mock_github.assert_called_once()
 
 
