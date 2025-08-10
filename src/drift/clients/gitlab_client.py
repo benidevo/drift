@@ -2,6 +2,7 @@ import hashlib
 import json
 import re
 import secrets
+import sys
 import time
 from typing import Any
 
@@ -439,6 +440,7 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
             estimated_memory = 0
 
             while len(notes) < self.MAX_COMMENTS_PER_MR and page <= max_pages:
+                # Pre-check expected memory usage
                 expected_size = per_page * self.ESTIMATED_OBJECT_OVERHEAD
                 if estimated_memory + expected_size > self.MAX_MEMORY_PER_REQUEST:
                     self.logger.warning(
@@ -456,15 +458,40 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                 if not batch:
                     break
 
-                batch_memory = sum(self._estimate_object_size(note) for note in batch)
-                if estimated_memory + batch_memory > self.MAX_MEMORY_PER_REQUEST:
+                actual_batch_size = 0
+                for note in batch:
+                    if hasattr(note, "__dict__"):
+                        actual_batch_size += len(str(note.__dict__))
+                    else:
+                        actual_batch_size += sys.getsizeof(note)
+
+                # Check if actual size would exceed limit
+                if estimated_memory + actual_batch_size > self.MAX_MEMORY_PER_REQUEST:
                     self.logger.warning(
-                        f"Stopping comment fetch for MR {mr_id}: actual memory exceeded"
+                        f"Stopping comment fetch for MR {mr_id}: "
+                        f"actual memory exceeded ({actual_batch_size} bytes)"
                     )
+                    # Only process notes that fit within the limit
+                    safe_notes = []
+                    current_size = estimated_memory
+                    for note in batch:
+                        note_size = (
+                            len(str(note.__dict__))
+                            if hasattr(note, "__dict__")
+                            else sys.getsizeof(note)
+                        )
+                        if current_size + note_size <= self.MAX_MEMORY_PER_REQUEST:
+                            safe_notes.append(note)
+                            current_size += note_size
+                        else:
+                            break
+                    if safe_notes:
+                        notes.extend(safe_notes)
+                        estimated_memory = current_size
                     break
 
                 notes.extend(batch)
-                estimated_memory += batch_memory
+                estimated_memory += actual_batch_size
                 page += 1
                 if len(batch) < per_page:
                     break

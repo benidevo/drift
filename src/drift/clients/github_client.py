@@ -1,6 +1,7 @@
 import hashlib
 import json
 import secrets
+import sys
 from typing import Any
 
 from cachetools import TTLCache
@@ -78,7 +79,6 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
 
     @staticmethod
     def _validate_repo_identifier(identifier: str) -> None:
-        """Validate repository identifier format with length limits."""
         if len(identifier) > 255:
             raise ValueError("Repository identifier too long")
 
@@ -97,12 +97,14 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
             raise ValueError("Invalid characters in repository identifier")
 
     def _validate_pr_id(self, pr_id: str) -> int:
-        """Validate and convert PR ID with proper bounds checking."""
         if not isinstance(pr_id, str | int):
             raise ResourceNotFoundError("Invalid PR identifier type")
 
         try:
             pr_int = int(pr_id)
+            # Check for overflow before validation
+            if pr_int > sys.maxsize or pr_int < -sys.maxsize:
+                raise OverflowError("PR ID exceeds system limits")
             if not (1 <= pr_int <= 2147483647):
                 raise ValueError("PR ID out of valid range")
             return pr_int
@@ -110,12 +112,14 @@ class GitHubClient(BaseGitClient[Github], CacheMixin, PaginationMixin):
             raise ResourceNotFoundError("Invalid PR identifier") from e
 
     def _validate_comment_id(self, comment_id: str) -> int:
-        """Validate and convert comment ID with proper bounds checking."""
         if not isinstance(comment_id, str | int):
             raise ResourceNotFoundError("Invalid comment identifier type")
 
         try:
             comment_int = int(comment_id)
+            # Check for overflow before validation
+            if comment_int > sys.maxsize or comment_int < -sys.maxsize:
+                raise OverflowError("Comment ID exceeds system limits")
             if not (1 <= comment_int <= 2147483647):
                 raise ValueError("Comment ID out of valid range")
             return comment_int

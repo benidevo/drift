@@ -30,6 +30,18 @@ class RetryMixin:
             ConnectionError,
         ),
     ) -> Callable[..., Any]:
+        # Validate and cap max_retries to prevent retry storms
+        if max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+
+        # Cap at reasonable maximum to prevent retry storms
+        MAX_ALLOWED_RETRIES = 10
+        effective_max_retries = min(max_retries, MAX_ALLOWED_RETRIES)
+        if max_retries > MAX_ALLOWED_RETRIES:
+            self._retry_logger.warning(
+                f"max_retries capped at {MAX_ALLOWED_RETRIES} (was {max_retries})"
+            )
+
         def wait_strategy(retry_state: RetryCallState) -> float:
             if retry_state.outcome and retry_state.outcome.failed:
                 exception = retry_state.outcome.exception()
@@ -70,15 +82,14 @@ class RetryMixin:
             if not isinstance(exception, RateLimitError):
                 attempt = retry_state.attempt_number
                 self._retry_logger.warning(
-                    f"Attempt {attempt}/{max_retries} failed: {exception}. Retrying..."
+                    f"Attempt {attempt}/{effective_max_retries} failed: "
+                    f"{exception}. Retrying..."
                 )
 
             return True
 
         retry_decorator = retry(
-            stop=stop_after_attempt(max_retries)
-            if max_retries > 0
-            else stop_after_attempt(1),
+            stop=stop_after_attempt(max(effective_max_retries, 1)),
             wait=wait_strategy,
             retry=should_retry,
             reraise=True,
