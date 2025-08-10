@@ -545,6 +545,13 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                         break
 
                     try:
+                        if not note.get("id") or not note.get("created_at"):
+                            self.logger.warning(
+                                f"Skipping malformed discussion note in MR {mr_id}: "
+                                "missing required fields"
+                            )
+                            continue
+
                         position: GitLabPosition | None = None
                         if "position" in note and isinstance(
                             note.get("position"), dict
@@ -557,14 +564,14 @@ class GitLabClient(BaseGitClient[Gitlab], CacheMixin, PaginationMixin):
                             )
 
                         discussion_note_data: GitLabNote = {
-                            "id": note.get("id", ""),
+                            "id": int(note["id"]),
                             "author": {
                                 "username": note.get("author", {}).get(
                                     "username", "unknown"
                                 )
                             },
                             "body": note.get("body", ""),
-                            "created_at": note.get("created_at", ""),
+                            "created_at": note["created_at"],
                             "updated_at": note.get("updated_at"),
                             "position": position,
                         }
